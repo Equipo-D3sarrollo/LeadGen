@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LeadGen — Panel</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #0f1115; color: #e7e7ea; margin: 0; padding: 32px;
+  }
+  h1 { font-weight: 600; margin-bottom: 4px; }
+  .subtitulo { color: #9a9aa5; margin-bottom: 28px; }
+  h2 { font-size: 18px; margin-top: 36px; }
+
+  .panel {
+    background: #1a1d24; border: 1px solid #2a2d35; border-radius: 12px;
+    padding: 20px; margin-bottom: 24px;
+  }
+  label { display:block; font-size: 13px; color:#9a9aa5; margin-bottom: 6px; margin-top: 14px; }
+  input[type=text], textarea {
+    width: 100%; background:#111318; border:1px solid #2a2d35; border-radius:8px;
+    color:#e7e7ea; padding: 10px 12px; font-size: 14px; font-family: inherit;
+  }
+  textarea { font-family: "SFMono-Regular", Consolas, monospace; font-size: 12px; min-height: 140px; }
+  .fila-checkbox { display:flex; align-items:center; gap:8px; margin-top: 14px; }
+  .fila-checkbox input { width: auto; }
+
+  button {
+    background: #8b7cf6; color: white; border: none; border-radius: 8px;
+    padding: 10px 18px; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 18px;
+  }
+  button:hover { background: #7a6ce8; }
+  button.secundario { background: #2a2d35; }
+  button.secundario:hover { background: #35383f; }
+  button.peligro { background: #3a1f24; color: #f28b8b; }
+
+  .avanzado summary { cursor: pointer; color:#9a9aa5; font-size: 13px; margin-top: 10px; }
+
+  .flash { padding: 12px 16px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; }
+  .flash.ok { background: #16281f; color: #7ee2a8; border: 1px solid #1f4030; }
+  .flash.error { background: #2b1a1a; color: #f28b8b; border: 1px solid #4a2626; }
+
+  .grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(160px,1fr)); gap:16px; margin: 20px 0 32px; }
+  .card { background:#1a1d24; border:1px solid #2a2d35; border-radius:12px; padding:18px; }
+  .card .num { font-size:28px; font-weight:700; color:#8b7cf6; }
+  .card .label { color:#9a9aa5; font-size:12px; margin-top:4px; }
+
+  table { width:100%; border-collapse:collapse; background:#1a1d24; border-radius:12px; overflow:hidden; }
+  th, td { text-align:left; padding:10px 14px; border-bottom:1px solid #2a2d35; font-size:13px; }
+  th { background:#20232b; color:#9a9aa5; text-transform:uppercase; font-size:11px; }
+  tr:hover { background:#20232b; }
+  .score { font-weight:700; color:#8b7cf6; }
+  .badge { display:inline-block; padding:2px 8px; border-radius:6px; font-size:11px; }
+  .badge.si { background:#16281f; color:#7ee2a8; }
+  .badge.no { background:#2b1a1a; color:#8a8a92; }
+
+  .acciones { display:flex; gap:10px; flex-wrap: wrap; margin: 20px 0; }
+  a.boton { text-decoration:none; }
+
+  .estado-procesando {
+    background:#20232b; border:1px solid #8b7cf6; border-radius:8px;
+    padding: 12px 16px; font-size: 13px; margin-bottom: 20px; color:#c7c0fb;
+  }
+</style>
+</head>
+<body>
+  <h1>LeadGen — Panel</h1>
+  <div class="subtitulo">Pega la URL de un directorio, procésala y revisa los resultados aquí mismo.</div>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for categoria, mensaje in messages %}
+      <div class="flash {{ categoria }}">{{ mensaje }}</div>
+    {% endfor %}
+  {% endwith %}
+
+  {% if estado.procesando %}
+    <div class="estado-procesando" id="estado-box">
+      Procesando <strong>{{ estado.url }}</strong>... esto puede tardar según el número de empresas.
+      Esta página se refresca sola cada 5 segundos.
+    </div>
+    <script>
+      setTimeout(() => window.location.reload(), 5000);
+    </script>
+  {% elif estado.error %}
+    <div class="flash error">Ocurrió un error procesando {{ estado.url }}: {{ estado.error }}</div>
+  {% endif %}
+
+  <div class="panel">
+    <form method="POST" action="{{ url_for('procesar') }}">
+      <label for="url">URL del directorio</label>
+      <input type="text" id="url" name="url" placeholder="https://directorio-de-empresas.com" required>
+
+      <div class="fila-checkbox">
+        <input type="checkbox" id="usar_navegador" name="usar_navegador">
+        <label for="usar_navegador" style="margin:0;">Usar navegador (para sitios que cargan datos con JavaScript, ej. React/Next.js). Más lento.</label>
+      </div>
+
+      <div class="fila-checkbox">
+        <input type="checkbox" id="usar_ia" name="usar_ia">
+        <label for="usar_ia" style="margin:0;">Generar observaciones con IA (requiere ANTHROPIC_API_KEY configurada)</label>
+      </div>
+
+      <label for="max_resultados_maps">Máximo de negocios a traer si pegaste una URL de Google Maps</label>
+      <input type="text" id="max_resultados_maps" name="max_resultados_maps" value="40" style="max-width:120px;">
+      <div style="font-size:12px; color:#6f6f78; margin-top:4px;">
+        Si la URL contiene "google.com/maps", LeadGen la detecta sola y usa el modo Google Maps automáticamente (no necesitas configurar selectores para eso).
+      </div>
+
+      <details class="avanzado">
+        <summary>Configuración avanzada de selectores CSS (opcional)</summary>
+        <label for="config_json">Pega aquí el contenido de tu config.json (déjalo vacío para usar detección automática)</label>
+        <textarea id="config_json" name="config_json" placeholder='{"selectores_directorio": {"selector_tarjeta": "div.business-card", "selector_enlace": "a.business-card-link"}, "selectores_ficha": {"nombre": "h1.business-name"}}'></textarea>
+      </details>
+
+      <button type="submit" {% if estado.procesando %}disabled{% endif %}>Procesar directorio</button>
+    </form>
+  </div>
+
+  <h2>Estadísticas</h2>
+  <div class="grid">
+    <div class="card"><div class="num">{{ stats.total }}</div><div class="label">Empresas encontradas</div></div>
+    <div class="card"><div class="num">{{ stats.sin_web }}</div><div class="label">Sin página web</div></div>
+    <div class="card"><div class="num">{{ stats.web_vieja }}</div><div class="label">Con web de baja calidad</div></div>
+    <div class="card"><div class="num">{{ stats.potenciales }}</div><div class="label">Clientes potenciales (score ≥ 50)</div></div>
+    <div class="card"><div class="num">{{ stats.con_whatsapp }}</div><div class="label">Con WhatsApp</div></div>
+    <div class="card"><div class="num">{{ stats.con_correo }}</div><div class="label">Con correo</div></div>
+  </div>
+
+  <div class="acciones">
+    <a class="boton" href="{{ url_for('exportar', formato='excel') }}"><button type="button">Descargar Excel</button></a>
+    <a class="boton" href="{{ url_for('exportar', formato='csv') }}"><button type="button" class="secundario">Descargar CSV</button></a>
+    <a class="boton" href="{{ url_for('exportar', formato='json') }}"><button type="button" class="secundario">Descargar JSON</button></a>
+    <form method="POST" action="{{ url_for('limpiar') }}" onsubmit="return confirm('¿Seguro que quieres borrar todos los leads guardados?');" style="display:inline;">
+      <button type="submit" class="peligro">Limpiar base de datos</button>
+    </form>
+  </div>
+
+  <h2>Resultados ({{ filas|length }})</h2>
+  <table>
+    <tr>
+      <th>Empresa</th><th>Ciudad</th><th>Score</th><th>Clasificación</th>
+      <th>Web</th><th>WhatsApp</th><th>Correo</th><th>Teléfono</th>
+    </tr>
+    {% for f in filas %}
+    <tr>
+      <td>{{ f['nombre'] or '-' }}</td>
+      <td>{{ f['ciudad'] or '-' }}</td>
+      <td class="score">{{ f['lead_score'] }}</td>
+      <td>{{ f['lead_clasificacion'] }}</td>
+      <td><span class="badge {{ 'si' if f['tiene_web'] else 'no' }}">{{ 'Sí' if f['tiene_web'] else 'No' }}</span></td>
+      <td><span class="badge {{ 'si' if f['tiene_whatsapp'] else 'no' }}">{{ 'Sí' if f['tiene_whatsapp'] else 'No' }}</span></td>
+      <td><span class="badge {{ 'si' if f['tiene_correo'] else 'no' }}">{{ 'Sí' if f['tiene_correo'] else 'No' }}</span></td>
+      <td><span class="badge {{ 'si' if f['tiene_telefono'] else 'no' }}">{{ 'Sí' if f['tiene_telefono'] else 'No' }}</span></td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8">Todavía no hay datos. Procesa un directorio arriba para empezar.</td></tr>
+    {% endfor %}
+  </table>
+
+</body>
+</html>

@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Postura emocional de empresas en 3D</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600&family=Newsreader:opsz,wght@6..72,500;6..72,600&display=swap" rel="stylesheet">
+<style>
+:root{
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  --bg:#EEF1F6; --panel:#FFFFFF; --ink:#172033; --muted:#5E6A82; --line:#D5DBE7;
+  --accent:#2F5BEA; --grid:#CBD2E0; --dim:#A9B1C3;
+  --surp:#7B4FD6; --neutral:#D6D8E0; --antic:#F08A24;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#10141D; --panel:#181E2A; --ink:#E7EBF3; --muted:#9AA6BD; --line:#2A3345;
+    --accent:#7C9BFF; --grid:#313B50; --dim:#4A5670; --neutral:#4B5163;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#10141D; --panel:#181E2A; --ink:#E7EBF3; --muted:#9AA6BD; --line:#2A3345;
+  --accent:#7C9BFF; --grid:#313B50; --dim:#4A5670; --neutral:#4B5163;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*,*::before,*::after{box-sizing:inherit}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Instrument Sans",system-ui,-apple-system,"Segoe UI",sans-serif;font-size:15px;line-height:1.5}
+.wrap{max-width:1240px;margin:0 auto;padding:28px 20px 48px}
+header{margin-bottom:22px;max-width:760px}
+h1{font-family:Newsreader,Georgia,"Times New Roman",serif;font-weight:600;font-size:clamp(28px,4.4vw,42px);line-height:1.1;margin:0 0 10px;letter-spacing:-.01em}
+header p{margin:0;color:var(--muted);font-size:16px}
+.layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:18px;align-items:start}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px}
+.plotcard{padding:6px;position:relative}
+#plot{width:100%;height:600px}
+.stat{position:absolute;left:18px;top:14px;z-index:2;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px;font-size:14px}
+.stat b{font-size:20px;font-family:Newsreader,Georgia,serif}
+.controls{padding:18px}
+.controls h2,.tablecard h2{font-family:Newsreader,Georgia,serif;font-size:19px;margin:0 0 12px;font-weight:600}
+.field{margin-bottom:16px}
+.field label{display:flex;justify-content:space-between;font-weight:500;font-size:14px;margin-bottom:4px}
+.field label span{color:var(--accent);font-variant-numeric:tabular-nums}
+.field small{display:block;color:var(--muted);font-size:12.5px;margin-top:2px}
+select,button{font:inherit;color:var(--ink)}
+select{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+input[type=range]{width:100%;accent-color:var(--accent)}
+button{width:100%;padding:10px 12px;border:0;border-radius:8px;background:var(--accent);color:#fff;font-weight:600;cursor:pointer}
+:root[data-theme="dark"] button{color:#10141D}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) button{color:#10141D}}
+button:hover{filter:brightness(1.08)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.legend{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--muted);margin-top:6px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%}
+.tablecard{margin-top:18px;padding:18px}
+.scroll{overflow-x:auto;max-height:420px;overflow-y:auto}
+table{border-collapse:collapse;width:100%;font-size:14px;font-variant-numeric:tabular-nums}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+th{position:sticky;top:0;background:var(--panel);color:var(--muted);font-weight:500}
+td.dot i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:8px;vertical-align:baseline}
+.bar{display:inline-block;height:6px;border-radius:3px;background:var(--accent);vertical-align:middle;margin-left:8px}
+.note{margin-top:18px;color:var(--muted);font-size:13px;max-width:820px}
+.empty{padding:20px;color:var(--muted)}
+@media (max-width:900px){
+  .layout{grid-template-columns:1fr}
+  #plot{height:440px}
+  .stat{position:static;margin:8px}
+}
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Postura emocional estimada de empresas</h1>
+    <p>Cada punto es una empresa. Su posición sale de las probabilidades de las 8 emociones de Plutchik; gira el cubo, ajusta los parámetros y mira cuáles pasan el filtro de venta.</p>
+  </header>
+
+  <div class="layout">
+    <div class="card plotcard">
+      <div class="stat" id="stat"></div>
+      <div id="plot" role="img" aria-label="Gráfica 3D de empresas según tristeza-alegría, aversión-confianza y miedo-ira"></div>
+    </div>
+
+    <aside class="card controls">
+      <h2>Parámetros</h2>
+      <div class="field">
+        <label for="prod">Producto a vender</label>
+        <select id="prod">
+          <option value="general">General</option>
+          <option value="cyber">Ciberseguridad (le va bien algo de miedo)</option>
+          <option value="growth">Expansión y crecimiento</option>
+        </select>
+        <small>Define la afinidad A<sub>k</sub> con cada emoción.</small>
+      </div>
+      <div class="field">
+        <label for="T">Temperatura T <span id="vT"></span></label>
+        <input id="T" type="range" min="0.2" max="2" step="0.05" value="0.5">
+        <small>Bajo: decisiones marcadas. Alto: todo se vuelve ambiguo.</small>
+      </div>
+      <div class="field">
+        <label for="th1">Emoción principal mínima θ₁ <span id="v1"></span></label>
+        <input id="th1" type="range" min="0.15" max="0.6" step="0.01" value="0.25">
+      </div>
+      <div class="field">
+        <label for="th2">Claridad mínima θ₂ <span id="v2"></span></label>
+        <input id="th2" type="range" min="0" max="0.2" step="0.005" value="0.05">
+        <small>Diferencia entre la emoción principal y la secundaria.</small>
+      </div>
+      <div class="field">
+        <label for="thS">Puntaje de venta mínimo θ<sub>S</sub> <span id="vS"></span></label>
+        <input id="thS" type="range" min="-0.2" max="0.6" step="0.01" value="0.2">
+      </div>
+      <div class="field">
+        <label for="N">Número de empresas <span id="vN"></span></label>
+        <input id="N" type="range" min="10" max="150" step="5" value="60">
+      </div>
+      <button id="regen" type="button">Generar otra muestra</button>
+      <div class="legend" style="margin-top:14px"><i style="background:var(--surp)"></i>Sorpresa<i style="background:var(--neutral);margin-left:8px"></i><i style="background:var(--antic)"></i>Anticipación (color = w)</div>
+      <div class="legend"><i style="background:var(--dim)"></i>Gris: descartada por el filtro · Tamaño: puntaje de venta</div>
+    </aside>
+  </div>
+
+  <section class="card tablecard">
+    <h2>Empresas que pasan el filtro</h2>
+    <div class="scroll" id="tablebox"></div>
+  </section>
+
+  <p class="note">Los datos son simulados y los pesos W, la afinidad A, T y los umbrales son supuestos de partida: se calibran con datos reales de conversión. Lo que se estima es una postura comercial, no el estado real de la empresa.</p>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/plotly.js-dist-min@2.35.2/plotly.min.js"></script>
+<script>
+(function(){
+  var EMO=['Alegría','Confianza','Miedo','Sorpresa','Tristeza','Aversión','Ira','Anticipación'];
+  // Filas: emociones. Columnas: tono web positivo, noticias negativas, crecimiento, riesgo sectorial
+  var W=[[ 1.5,-1.0, 0.8,-0.3],
+         [ 1.2,-1.5, 0.5,-0.5],
+         [-0.3, 1.0,-0.4, 1.5],
+         [ 0.2, 0.5, 0.3, 0.4],
+         [-1.0, 1.2,-0.8, 0.3],
+         [-0.5, 0.8,-0.3, 0.6],
+         [-0.4, 1.0,-0.2, 0.5],
+         [ 0.6,-0.2, 1.6, 0.0]];
+  var B=[0,0,0,0,0,0,0,0];
+  var AFF={
+    general:[0.5,0.6,-0.2,0.1,-0.4,-0.5,-0.6,0.8],
+    cyber:  [0.1,0.4, 0.8,0.2,-0.2,-0.4,-0.3,0.3],
+    growth: [0.6,0.7,-0.5,0.1,-0.6,-0.5,-0.4,0.9]
+  };
+  var SECT=['Fintech','Logística','Salud','Retail','Energía','Educación','Agro','Manufactura'];
+  var L=0.6;
+
+  function rng(seed){return function(){seed|=0;seed=seed+0x6D2B79F5|0;var t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+  var seed=7, signals=[], names=[];
+
+  function genData(n){
+    var r=rng(seed); signals=[]; names=[];
+    for(var i=0;i<n;i++){
+      var s=[];
+      for(var m=0;m<4;m++){s.push((r()+r())/2);}
+      signals.push(s);
+      var sec=SECT[Math.floor(r()*SECT.length)];
+      names.push(sec+' '+String(i+1).padStart(2,'0'));
+    }
+  }
+
+  function softmax(z,T){
+    var mx=Math.max.apply(null,z), e=z.map(function(v){return Math.exp((v-mx)/T);});
+    var sum=e.reduce(function(a,b){return a+b;},0);
+    return e.map(function(v){return v/sum;});
+  }
+
+  function cssVar(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim();}
+
+  function hex(c){return [parseInt(c.slice(1,3),16),parseInt(c.slice(3,5),16),parseInt(c.slice(5,7),16)];}
+  function mix(a,b,t){var A=hex(a),B2=hex(b);return 'rgb('+A.map(function(v,i){return Math.round(v+(B2[i]-v)*t);}).join(',')+')';}
+  function wColor(w){
+    var t=Math.max(-1,Math.min(1,w/L));
+    var n=cssVar('--neutral')||'#D6D8E0';
+    if(n.charAt(0)!=='#')n='#D6D8E0';
+    return t<0?mix(n,'#7B4FD6',-t):mix(n,'#F08A24',t);
+  }
+
+  function val(id){return parseFloat(document.getElementById(id).value);}
+
+  function compute(){
+    var T=val('T'), th1=val('th1'), th2=val('th2'), thS=val('thS');
+    var A=AFF[document.getElementById('prod').value];
+    var out=[];
+    for(var i=0;i<signals.length;i++){
+      var s=signals[i], z=[];
+      for(var k=0;k<8;k++){
+        var acc=B[k];
+        for(var m=0;m<4;m++)acc+=W[k][m]*s[m];
+        z.push(acc);
+      }
+      var p=softmax(z,T);
+      var x=p[0]-p[4], y=p[1]-p[5], zz=p[6]-p[2], w=p[7]-p[3];
+      var S=0; for(var q=0;q<8;q++)S+=p[q]*A[q];
+      var idx=p.map(function(v,j){return j;}).sort(function(a,b){return p[b]-p[a];});
+      var k1=idx[0], k2=idx[1], delta=p[k1]-p[k2];
+      var pass=(p[k1]>=th1)&&(delta>=th2)&&(S>=thS);
+      out.push({name:names[i],x:x,y:y,z:zz,w:w,S:S,k1:k1,k2:k2,p1:p[k1],delta:delta,pass:pass});
+    }
+    return out;
+  }
+
+  function fmt(v,d){return v.toFixed(d===undefined?2:d);}
+
+  function render(){
+    ['T','th1','th2','thS','N'].forEach(function(id){
+      var el=document.getElementById({T:'vT',th1:'v1',th2:'v2',thS:'vS',N:'vN'}[id]);
+      var v=val(id); el.textContent=(id==='N')?v:(id==='th2'?fmt(v,3):fmt(v,2));
+    });
+    var data=compute();
+    var ok=data.filter(function(d){return d.pass;});
+    var no=data.filter(function(d){return !d.pass;});
+    document.getElementById('stat').innerHTML='<b>'+ok.length+'</b> de '+data.length+' empresas pasan el filtro';
+
+    var ink=cssVar('--ink'), grid=cssVar('--grid'), dim=cssVar('--dim'), panel=cssVar('--panel');
+    var R=Math.max(L,Math.ceil(Math.max.apply(null,data.map(function(d){return Math.max(Math.abs(d.x),Math.abs(d.y),Math.abs(d.z));}))*10)/10);
+    var Smin=Math.min.apply(null,data.map(function(d){return d.S;}));
+    var Smax=Math.max.apply(null,data.map(function(d){return d.S;}));
+    function size(S){return 7+13*(S-Smin)/((Smax-Smin)||1);}
+    function hov(d){return '<b>'+d.name+'</b><br>Principal: '+EMO[d.k1]+' ('+fmt(d.p1)+')<br>Secundaria: '+EMO[d.k2]+'<br>Claridad Δ: '+fmt(d.delta)+'<br>Venta S: '+fmt(d.S)+'<br>w: '+fmt(d.w)+'<extra></extra>';}
+
+    var tNo={type:'scatter3d',mode:'markers',name:'Descartadas',
+      x:no.map(function(d){return d.x;}),y:no.map(function(d){return d.y;}),z:no.map(function(d){return d.z;}),
+      marker:{size:3.5,color:dim,opacity:.55},
+      hovertemplate:no.map(hov)};
+    var tOk={type:'scatter3d',mode:'markers',name:'Pasan el filtro',
+      x:ok.map(function(d){return d.x;}),y:ok.map(function(d){return d.y;}),z:ok.map(function(d){return d.z;}),
+      marker:{size:ok.map(function(d){return size(d.S);}),color:ok.map(function(d){return d.w;}),
+        colorscale:[[0,'#7B4FD6'],[0.5,cssVar('--neutral').charAt(0)==='#'?cssVar('--neutral'):'#D6D8E0'],[1,'#F08A24']],
+        cmin:-L,cmax:L,line:{color:ink,width:1},opacity:1,
+        colorbar:{title:{text:'w',font:{color:ink}},tickfont:{color:ink},thickness:12,len:.55,x:1.0}},
+      hovertemplate:ok.map(hov)};
+    var ends=[['Alegría',R,0,0],['Tristeza',-R,0,0],['Confianza',0,R,0],['Aversión',0,-R,0],['Ira',0,0,R],['Miedo',0,0,-R]];
+    var tEnd={type:'scatter3d',mode:'text',hoverinfo:'skip',showlegend:false,
+      x:ends.map(function(e){return e[1];}),y:ends.map(function(e){return e[2];}),z:ends.map(function(e){return e[3];}),
+      text:ends.map(function(e){return e[0];}),textfont:{color:ink,size:12,family:'Instrument Sans, sans-serif'}};
+    var tAxes={type:'scatter3d',mode:'lines',hoverinfo:'skip',showlegend:false,line:{color:ink,width:2},
+      x:[-R,R,null,0,0,null,0,0],y:[0,0,null,-R,R,null,0,0],z:[0,0,null,0,0,null,-R,R]};
+
+    function ax(title){return {title:{text:title,font:{color:ink,size:12}},range:[-R,R],gridcolor:grid,zerolinecolor:grid,backgroundcolor:'rgba(0,0,0,0)',showbackground:false,tickfont:{color:ink,size:10},color:ink};}
+    var layout={
+      paper_bgcolor:'rgba(0,0,0,0)',plot_bgcolor:'rgba(0,0,0,0)',
+      margin:{l:0,r:0,t:0,b:0},
+      font:{family:'Instrument Sans, sans-serif',color:ink},
+      scene:{
+        xaxis:ax('X: Tristeza ↔ Alegría'),yaxis:ax('Y: Aversión ↔ Confianza'),zaxis:ax('Z: Miedo ↔ Ira'),
+        aspectmode:'cube',camera:cam
+      },
+      legend:{x:0.01,y:0.02,bgcolor:panel,bordercolor:grid,borderwidth:1,font:{color:ink}},
+      hoverlabel:{font:{family:'Instrument Sans, sans-serif'}}
+    };
+    Plotly.react('plot',[tAxes,tNo,tOk,tEnd],layout,{responsive:true,displaylogo:false});
+
+    // Tabla
+    var box=document.getElementById('tablebox');
+    if(!ok.length){box.innerHTML='<div class="empty">Ninguna empresa cumple las tres condiciones. Baja los umbrales o sube la temperatura T.</div>';return;}
+    ok.sort(function(a,b){return b.S-a.S;});
+    var maxS=Math.max.apply(null,ok.map(function(d){return Math.max(d.S,0);}))||1;
+    var h='<table><thead><tr><th>Empresa</th><th>Principal</th><th>Secundaria</th><th>Claridad Δ</th><th>Venta S</th></tr></thead><tbody>';
+    ok.forEach(function(d){
+      h+='<tr><td class="dot"><i style="background:'+wColor(d.w)+'"></i>'+d.name+'</td><td>'+EMO[d.k1]+' ('+fmt(d.p1)+')</td><td>'+EMO[d.k2]+'</td><td>'+fmt(d.delta)+'</td><td>'+fmt(d.S)+'<span class="bar" style="width:'+Math.round(60*Math.max(d.S,0)/maxS)+'px"></span></td></tr>';
+    });
+    box.innerHTML=h+'</tbody></table>';
+  }
+
+  var cam={eye:{x:1.5,y:-1.5,z:0.9}};
+  var plotEl=document.getElementById('plot');
+
+  ['prod','T','th1','th2','thS'].forEach(function(id){
+    document.getElementById(id).addEventListener('input',render);
+  });
+  document.getElementById('N').addEventListener('input',function(){genData(val('N'));render();});
+  document.getElementById('regen').addEventListener('click',function(){seed=Math.floor(Math.random()*100000);genData(val('N'));render();});
+
+  // Conservar la cámara cuando la persona gira el cubo
+  function hookCam(){
+    if(plotEl.on){plotEl.on('plotly_relayout',function(e){if(e&&e['scene.camera'])cam=e['scene.camera'];});}
+  }
+
+  if(window.matchMedia){
+    var mq=window.matchMedia('(prefers-color-scheme: dark)');
+    var cb=function(){render();};
+    if(mq.addEventListener)mq.addEventListener('change',cb);
+  }
+
+  genData(val('N'));
+  render();
+  hookCam();
+})();
+</script>
+</body>
+</html>

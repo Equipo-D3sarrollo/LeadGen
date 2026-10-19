@@ -1,0 +1,21 @@
+{
+  "_comentario": "Este archivo es un EJEMPLO. Debes inspeccionar el HTML del directorio real (clic derecho > Inspeccionar en el navegador) y reemplazar estos selectores CSS por los que correspondan a ese sitio. Si dejas selectores_directorio vacío ({}), el sistema intenta detectar las tarjetas de empresa automáticamente (heurística genérica), aunque con menos precisión.",
+
+  "selectores_directorio": {
+    "selector_tarjeta": "div.business-card",
+    "selector_enlace": "a.business-card-link",
+    "selector_categoria": "span.business-category",
+    "selector_siguiente_pagina": "a.pagination-next"
+  },
+
+  "selectores_ficha": {
+    "nombre": "h1.business-name",
+    "direccion": ".business-address",
+    "ciudad": ".business-city",
+    "departamento": ".business-region",
+    "telefono": ".business-phone",
+    "horario": ".business-hours",
+    "descripcion": ".business-about",
+    "sitio_web": "a.business-website"
+  }
+}

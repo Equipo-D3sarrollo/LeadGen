@@ -1,0 +1,544 @@
+=====================================================================
+RESUMEN GENERAL: PERFIL EMOCIONAL-CONDUCTUAL DE EMPRESAS
+Modelo, formulas, parametros, fuentes de datos, uso y graficacion
+=====================================================================
+Fecha del resumen: 1 de octubre de 2026
+Estado: borrador de trabajo. Todos los pesos, umbrales y afinidades son
+SUPUESTOS INICIALES que deben calibrarse con datos reales de ventas.
+
+Archivos que acompanan este resumen (enviarlos juntos):
+  1. resumen_perfil_emocional_empresas.txt  (este documento)
+  2. emocion_empresas.m    (script MATLAB; su codigo tambien esta en el Anexo C)
+  3. emocion_empresas.html (simulacion web; se abre en el navegador y
+     necesita internet para cargar Plotly y las tipografias)
+
+
+---------------------------------------------------------------------
+1. CONTEXTO Y OBJETIVO
+---------------------------------------------------------------------
+Idea de partida: representar el estado de una entidad (persona o
+empresa) con un modelo reducido de emociones, ubicarlo como un punto en
+un espacio 3D y usarlo para filtrar empresas y vender el producto
+correcto a la empresa que tenga mayor disposicion a comprarlo.
+
+Ajuste conceptual importante: una empresa NO tiene emociones literales.
+Lo que se estima es una "postura comercial" o perfil emocional-
+conductual, inferido de senales observables (sitio web, resenas,
+eventos, registro mercantil). Es un proxy, no un diagnostico.
+
+El proyecto evoluciono en tres etapas:
+  A) Modelo de emociones de Plutchik reducido a 4 ejes, con punto 3D.
+  B) Version para empresas con softmax, filtro y puntaje de venta, con
+     visualizacion en MATLAB y en web.
+  C) Plan de adaptacion a un sistema de lead generation, con 6
+     dimensiones conductuales (0-100 %), matching con un catalogo de
+     productos y calibracion con resultados de venta.
+
+
+---------------------------------------------------------------------
+2. MODELO DE EMOCIONES (PLUTCHIK)
+---------------------------------------------------------------------
+Ocho emociones primarias, en este orden:
+  1 alegria, 2 confianza, 3 miedo, 4 sorpresa,
+  5 tristeza, 6 aversion, 7 ira, 8 anticipacion
+
+Cuatro ejes (pares opuestos):
+  V (valoracion)    = alegria - tristeza
+  C (aceptacion)    = confianza - aversion
+  R (respuesta)     = ira - miedo
+  E (expectativa)   = anticipacion - sorpresa
+Cada eje queda en [-1, +1] si las emociones estan en [0, 1].
+
+Alternativa 3D con respaldo empirico: modelo PAD (Mehrabian y Russell)
+  X = valencia, Y = activacion, Z = dominancia.
+Plutchik con 4 ejes no cabe en 3 dimensiones: se usan 3 ejes espaciales
+(V, C, R) y el cuarto (E) como color o tamano del punto.
+
+
+---------------------------------------------------------------------
+3. FORMULA COMPLETA DEL PUNTO EMOCIONAL DE UNA EMPRESA
+---------------------------------------------------------------------
+Entradas:
+  s  = vector de senales normalizadas en [0,1] (M senales)
+  W  = matriz de pesos 8 x M
+  b  = linea base (vector de 8)
+  T  = temperatura (T > 0)
+
+Paso 1. Puntajes y probabilidades
+  z_k = b_k + suma_m ( W_km * s_m )
+  p_k = exp(z_k / T) / suma_l exp(z_l / T)        (softmax; suma p = 1)
+
+Paso 2. Coordenadas del punto
+  x = p_alegria   - p_tristeza
+  y = p_confianza - p_aversion
+  z = p_ira       - p_miedo
+  w = p_anticipacion - p_sorpresa
+
+  Forma compacta:   (x, y, z, w)^T = D * softmax( (b + W*s) / T )
+  con D = [ 1 0  0  0 -1  0 0 0 ]    columnas en el orden
+          [ 0 1  0  0  0 -1 0 0 ]    alegria, confianza, miedo,
+          [ 0 0 -1  0  0  0 1 0 ]    sorpresa, tristeza, aversion,
+          [ 0 0  0 -1  0  0 0 1 ]    ira, anticipacion
+
+Paso 3. Puntaje de venta
+  S = suma_k ( p_k * A_k ),   A_k en [-1, 1] = afinidad del producto
+                              con la emocion k
+
+Paso 4. Emocion principal, secundaria y claridad
+  k1 = argmax p_k ;  k2 = segunda mayor ;  Delta = p_k1 - p_k2
+  (alternativa: entropia H = - suma p_k * ln(p_k))
+
+Paso 5. Filtro (la empresa se conserva si cumple las tres):
+  p_k1 >= theta1   Y   Delta >= theta2   Y   S >= theta_S
+
+Region alcanzable: como las p suman 1, |x|+|y|+|z|+|w| <= 1. Los
+puntos viven en un octaedro dentro del cubo [-1,1]^3. Con T bajo los
+puntos se alejan del centro; con T alto se agrupan cerca del origen.
+
+Version dinamica opcional (por eventos, no por dias):
+  z_k(t) = b_k + suma_{j: t_j <= t} a_jk * ln(1 + g_j) * exp(-lambda_k * (t - t_j))
+  donde t_j = momento del evento j, g_j = gravedad, a_jk = cuanto afecta
+  el evento a la emocion k, lambda_k = velocidad de olvido.
+  Equivale a: de_k/dt = -lambda_k * (e_k - b_k) entre eventos, con un
+  salto en cada evento.
+
+Herramientas matematicas usadas y para que sirve cada una:
+  exponencial decreciente ... olvido / retorno a la linea base
+  logaritmo ln(1+g) ......... rendimientos decrecientes
+  potencia o raiz (n<1) ..... suaviza intensidades extremas
+  sigmoide / tanh ........... mantiene valores dentro de un rango
+  escalon / ReLU ............ umbrales de activacion
+  softmax y argmax .......... emocion principal y secundaria
+
+
+---------------------------------------------------------------------
+4. FORMULA ORIGINAL DE EFICIENCIA (REFERENCIA)
+---------------------------------------------------------------------
+  Eficiencia_persona(x) = Integral_0^x [ suma_i H_Pi(t) * A_i(t) ] dt
+                          -------------------------------------------
+                          Integral_0^x [ suma_i H_Ri(t) ] dt
+
+  H_P = horas ganadas, H_R = horas reales, A = factor de la tarea.
+  Version con factor emocional: se multiplica el numerador por M(t):
+  M(t) = clamp( 1 + b1*V + b2*C + b3*E - b4*|R| , Mmin, Mmax )
+  con b = (0.10, 0.05, 0.05, 0.10) y M en [0.7, 1.3] (supuestos).
+
+  Nota: las emociones cambian con eventos, no con el calendario, por lo
+  que para empresas se abandono la integral sobre dias y se uso la
+  version por eventos o una foto estatica.
+
+
+---------------------------------------------------------------------
+5. PARAMETROS DE LA SIMULACION (VALORES DE PARTIDA)
+---------------------------------------------------------------------
+Senales de entrada (columnas de W), todas en [0,1]:
+  1 tono web positivo   2 noticias negativas
+  3 crecimiento         4 riesgo sectorial
+
+Matriz W (filas = emociones; columnas = las 4 senales):
+  alegria       [ 1.5  -1.0   0.8  -0.3 ]
+  confianza     [ 1.2  -1.5   0.5  -0.5 ]
+  miedo         [-0.3   1.0  -0.4   1.5 ]
+  sorpresa      [ 0.2   0.5   0.3   0.4 ]
+  tristeza      [-1.0   1.2  -0.8   0.3 ]
+  aversion      [-0.5   0.8  -0.3   0.6 ]
+  ira           [-0.4   1.0  -0.2   0.5 ]
+  anticipacion  [ 0.6  -0.2   1.6   0.0 ]
+
+Linea base:       b = 0 (las 8)
+Temperatura:      T = 0.5   (rango explorable 0.2 - 2)
+Umbrales:         theta1 = 0.25, theta2 = 0.05, theta_S = 0.20
+Escala del cubo:  ejes de +-0.6, que se amplian solos si, con T bajo, algun
+                  punto sale de ese rango
+
+Afinidades A_k (orden: alegria, confianza, miedo, sorpresa, tristeza,
+aversion, ira, anticipacion):
+  General          [ 0.5  0.6 -0.2  0.1 -0.4 -0.5 -0.6  0.8 ]
+  Ciberseguridad   [ 0.1  0.4  0.8  0.2 -0.2 -0.4 -0.3  0.3 ]
+  Expansion        [ 0.6  0.7 -0.5  0.1 -0.6 -0.5 -0.4  0.9 ]
+
+Ejemplo numerico: p = (alegria .10, confianza .45, miedo .08,
+sorpresa .03, tristeza .03, aversion .03, ira .03, anticipacion .25)
+  -> x = 0.07, y = 0.42, z = -0.05, w = 0.22.
+  Principal: confianza; secundaria: anticipacion; Delta = 0.20.
+  Con theta1 = 0.40 y theta2 = 0.15 pasa el filtro.
+
+
+---------------------------------------------------------------------
+6. COMO USAR Y GRAFICAR
+---------------------------------------------------------------------
+6.1 Pagina web interactiva (ya publicada)
+  https://claude.ai/artifact/6ozDMxLFKSHQJ6f16ps9nf
+  AVISO: la pagina es privada para quien la publico hasta que use la
+  opcion de compartir. Quien reciba este .txt NO podra abrir el enlace
+  si no se le comparte; en ese caso enviarle el archivo .html.
+  - Simula empresas (10 a 150) con las formulas de la seccion 3.
+  - Cubo 3D rotable: X = tristeza<->alegria, Y = aversion<->confianza,
+    Z = miedo<->ira.
+  - Color = w (violeta = sorpresa, naranja = anticipacion).
+  - Tamano = puntaje de venta S. Gris = descartada por el filtro.
+  - Controles: producto, T, theta1, theta2, theta_S, numero de
+    empresas, boton "Generar otra muestra".
+  - Tabla de empresas que pasan el filtro, ordenadas por S.
+  - Los datos son simulados (aleatorios).
+
+6.2 MATLAB
+  Archivo: emocion_empresas.m
+  - Cambiar la matriz "s" (N x 4, valores en [0,1]) por datos reales.
+  - Si cambia el numero de senales, ajustar las columnas de W.
+  - En versiones anteriores a R2022a, "clim" se llama "caxis".
+  - Imprime una tabla: empresa, emocion principal, secundaria, Delta,
+    puntaje de venta y si pasa el filtro.
+
+6.3 GeoGebra (vista 3D, una empresa a la vez con sliders)
+  T = Slider(0.1, 3, 0.1)
+  z1 ... z8 = Slider(-3, 3, 0.1)      (puntajes de las 8 emociones)
+  Q = exp(z1/T)+exp(z2/T)+exp(z3/T)+exp(z4/T)+exp(z5/T)+exp(z6/T)+exp(z7/T)+exp(z8/T)
+  pAle = exp(z1/T)/Q      pCon = exp(z2/T)/Q
+  pMie = exp(z3/T)/Q      pSor = exp(z4/T)/Q
+  pTri = exp(z5/T)/Q      pAve = exp(z6/T)/Q
+  pIra = exp(z7/T)/Q      pAnt = exp(z8/T)/Q
+  P = (pAle - pTri, pCon - pAve, pIra - pMie)
+  w = pAnt - pSor
+  Ajustar los ejes a +-0.6 para ver el espacio util.
+
+
+---------------------------------------------------------------------
+7. PLAN DE ADAPTACION A LEAD GENERATION (6 DIMENSIONES)
+---------------------------------------------------------------------
+Arquitectura:
+  Senales (web/maps/registros) -> Perfil (6 dimensiones, 0-100 %)
+  -> Match con catalogo de productos (%) -> Score final
+El lead_score existente se conserva; se agregan dos capas encima.
+
+Dimensiones (cada una 0-100 %):
+  Madurez digital ........... web, HTTPS, analitica, CMS
+  Dolor / urgencia .......... sin web, web lenta, sin movil, sin formulario
+  Confianza / reputacion .... rating y resenas
+  Dinamismo ................. resenas recientes, horarios, antiguedad
+  Apertura comercial ........ WhatsApp, correo, telefono, formulario
+  Sofisticacion de marca .... calidad y tono de la descripcion (IA)
+
+Relacion aproximada con Plutchik: dolor ~ miedo/tristeza,
+dinamismo ~ anticipacion/alegria, confianza ~ confianza,
+apertura ~ confianza frente a aversion.
+
+Formulas del plan:
+  Rating bayesiano:   R = (v*r + m*C) / (v + m)
+        v = n de resenas, r = rating, C = media global, m = peso del prior
+  Saturacion log:     S = 100 * ln(1+v) / ln(1+v_max)
+  Recencia:           peso = exp(-lambda * dias)
+  Normalizacion:      min-max o z-score entre empresas de una busqueda
+  Match:              similitud coseno entre el vector de la empresa y
+                      el vector ideal de cada producto
+  Reparto:            softmax sobre los matches (ej. 62 % / 25 % / 13 %)
+  Score final:        alfa * lead_score_normalizado + beta * match_pct
+                      (alfa y beta en config.py)
+
+Fases:
+  1 Definir negocio: catalogo de productos, vector ideal de cada uno,
+    arquetipos de perfil (catalogo_productos.json)
+  2 Captura de senales (rating y numero de resenas aun no se extraen)
+  3 Motor de perfil (perfil.py, funciones puras, pruebas unitarias)
+  4 Motor de matching (matching.py)
+  5 Capa de IA (tono y sofisticacion en JSON con evidencia, con
+    respaldo por reglas)
+  6 Presentacion (radar de perfil, ranking, exportacion)
+  7 Calibracion con resultados reales de venta
+
+Continuidad: mantener PLAN.md (fases con casillas) y DECISIONES.md
+(formulas, pesos y por que), versionar con git, un commit por fase.
+
+
+---------------------------------------------------------------------
+8. FUENTES DE DATOS (de donde salen las variables)
+---------------------------------------------------------------------
+Verificar terminos de uso, costos y campos antes de construir.
+
+  Google Places API (oficial): rating, numero de resenas, telefono,
+    web, horarios, estado, categoria. Devuelve pocas resenas (sirven
+    para tono, no para volumen). Tiene costo y limites de almacenamiento.
+  Sitio web de la empresa: HTTPS, tiempo de respuesta, viewport movil,
+    formularios, enlaces a WhatsApp, scripts de analitica, huella del
+    CMS, texto. Respetar robots.txt y limitar la frecuencia.
+  PageSpeed Insights API: rendimiento y experiencia movil.
+  RUES / camaras de comercio (Colombia): matricula activa, fecha de
+    registro, ultima renovacion, actividad economica (CIIU).
+  RDAP/WHOIS: antiguedad del dominio.
+  LLM (Claude) sobre texto publico: tono y sofisticacion en JSON de
+    0-100, con la frase que justifica cada puntaje.
+  CRM propio (la mas valiosa): a quien se contacto, que producto se
+    ofrecio y que paso. Registrarla desde el primer dia.
+
+Riesgos:
+  - Redes sociales de terceros: no hay API oficial para medir su
+    actividad y extraerla va contra los terminos. Usar solo lo que
+    aparece en el sitio web.
+  - Scraping de Google Maps: va contra sus terminos y el HTML cambia.
+    Preferir la API oficial.
+  - Datos personales: en Colombia aplica la Ley 1581 de 2012 (habeas
+    data). Consultar a un abogado antes de contacto masivo.
+
+Datos faltantes (regla de oro):
+  1. Nunca rellenar con cero: guardar como nulo.
+  2. Calcular cada dimension solo con las senales disponibles y
+     registrar la COBERTURA (fraccion medida).
+  3. Mostrar la confianza junto al puntaje; penalizar o excluir leads
+     con cobertura muy baja.
+  Guardar cada senal con valor, fuente, fecha e indicador de confianza.
+
+Orden de construccion: 1) Places + web + PageSpeed + RDAP, 2) RUES,
+3) LLM, 4) redes sociales solo si hay fuente legitima.
+
+
+---------------------------------------------------------------------
+9. LIMITACIONES CONOCIDAS DE LA FORMULA ACTUAL
+---------------------------------------------------------------------
+Estructurales:
+  - El softmax hace competir las emociones (suman 1) y pierde la
+    intensidad: dos empresas con emociones debiles o fuertes pueden dar
+    las mismas probabilidades.
+  - La resta de opuestos cancela informacion: alegria 0.4 y tristeza
+    0.4 dan x = 0, igual que alegria 0 y tristeza 0.
+  - Los opuestos de Plutchik son discutibles (miedo/ira,
+    sorpresa/anticipacion).
+  - T interactua con los umbrales: cambiar uno obliga a recalibrar los
+    otros.
+Validez:
+  - Todo es supuesto: no hay evidencia de que prediga ventas.
+  - Emocion no es intencion de compra (faltan presupuesto, necesidad,
+    autoridad de decision).
+  - Las senales son proxies debiles (el sitio web muestra la imagen que
+    la empresa quiere dar).
+  - La afinidad A_k es otra suposicion (riesgo de circularidad).
+  - La simulacion usa datos aleatorios: no demuestra nada por si sola.
+Diseno:
+  - Las tres condiciones del filtro estan correlacionadas.
+  - Filtro duro: S = 0.199 y S = 0.201 reciben destinos opuestos.
+  - La claridad (diferencia de los dos primeros) ignora el resto de la
+    distribucion.
+  - La empresa se trata como una sola entidad, pero compra una persona
+    o un comite.
+Puntos a revisar del plan de 6 dimensiones:
+  - El coseno ignora la magnitud: combinarlo con una distancia.
+  - La normalizacion por busqueda hace los porcentajes relativos; para
+    comparar entre busquedas usar referencias fijas (percentiles).
+  - Las dimensiones estan correlacionadas (dolor y madurez casi
+    inversas): revisar correlaciones cuando haya datos.
+  - Fijar y documentar la temperatura del softmax de matches.
+  - Registrar resultados de venta desde la Fase 2, no solo en la 7.
+
+
+---------------------------------------------------------------------
+10. MEJORAS RECOMENDADAS (EN ORDEN DE PRIORIDAD)
+---------------------------------------------------------------------
+  1. Validar primero: con historial de ventas, comparar un modelo SIN
+     emociones contra uno CON emociones (AUC, lift). Si no mejora, el
+     componente emocional no aporta.
+  2. Aprender W y A de los datos (regresion logistica u otro modelo).
+  3. Anadir datos no emocionales: sector, tamano, presupuesto estimado,
+     fase de crecimiento, contactos de decision.
+  4. Sustituir el softmax por sigmoides independientes mas una
+     intensidad:  p_k = sigmoide(z_k),  I = max(p_k) o promedio.
+  5. Conservar la ambivalencia:  ambivalencia_x = min(alegria, tristeza)
+     (analogo para los otros ejes).
+  6. Pasar de filtro duro a ranking por probabilidad de compra y fijar
+     el corte por valor esperado.
+  7. Usar entropia como claridad y reportar incertidumbre (remuestreo).
+  8. Medir emociones del texto con una fuente real (lexico NRC, basado
+     en las 8 emociones de Plutchik), dando mas peso a eventos que al
+     tono del sitio.
+  9. Linea base b_k distinta por sector en lugar de cero.
+
+Orden sugerido: validar (1), luego aprender de datos y sumar variables
+no emocionales (2, 3), y solo despues refinar la matematica (4 a 9).
+
+
+---------------------------------------------------------------------
+11. PROXIMOS PASOS
+---------------------------------------------------------------------
+  - Definir el catalogo de productos o servicios (Fase 1): es el
+    insumo que desbloquea los vectores ideales y los arquetipos.
+  - Aclarar que extrae hoy el programa de Google Maps (campos, y si
+    usa API oficial o scraping).
+  - Redactar PLAN.md y DECISIONES.md con las formulas y parametros de
+    este documento.
+  - Comenzar a registrar contactos y resultados de venta.
+  - Opcional: version mejorada (sigmoides, intensidad, ambivalencia) en
+    el script de MATLAB y en la pagina web, para comparar.
+
+
+---------------------------------------------------------------------
+12. VERIFICACIONES REALIZADAS Y SUS LIMITES
+---------------------------------------------------------------------
+Hecho:
+  - Ejemplo numerico de la seccion 5 recalculado: x = 0.07, y = 0.42,
+    z = -0.05, w = 0.22 (coincide) y las p suman 1.
+  - Sintaxis del JavaScript de la pagina web comprobada (sin errores).
+  - Prueba de cordura con 2000 empresas simuladas (parametros de la
+    seccion 5, theta1 = 0.25, theta2 = 0.05, theta_S = 0.20):
+        General, T = 0.5 ........ pasa el filtro ~39 %
+        Ciberseguridad, T = 0.5 . pasa el filtro ~77 %
+        Expansion, T = 0.5 ...... pasa el filtro ~41 %
+        General, T = 1.0 ........ ~12 %
+        General, T = 2.0 ........ 0 %
+    Lectura: con T alto casi nada es "claro"; y para ciberseguridad el
+    umbral theta_S = 0.20 es demasiado permisivo (casi no filtra).
+    Hay que subirlo o calibrarlo por producto.
+  - Los puntos llegan a |x|+|y|+|z| de ~0.72 con T = 0.5 y ~0.97 con
+    T = 0.2, por eso los ejes ahora se amplian automaticamente.
+
+NO verificado:
+  - El script de MATLAB no se pudo ejecutar (no hay MATLAB en el
+    entorno de trabajo). Su logica es la misma que la de la pagina.
+  - La pagina web no se vio visualmente en un navegador.
+  - Los datos son simulados: ningun resultado dice nada sobre empresas
+    reales ni sobre probabilidad de compra.
+
+
+---------------------------------------------------------------------
+ANEXO A. COORDENADAS DE LAS EMOCIONES EN 3D
+---------------------------------------------------------------------
+Opcion A: modelo PAD (aproximadas, de la literatura; calibrables)
+  X = valencia, Y = activacion, Z = dominancia, cada una en [-1, +1]
+  Emocion        X(valencia)  Y(activacion)  Z(dominancia)
+  Alegria          +0.8         +0.5          +0.4
+  Confianza        +0.6          0.0          +0.3
+  Miedo            -0.6         +0.6          -0.7
+  Sorpresa         +0.1         +0.8          -0.2
+  Tristeza         -0.7         -0.4          -0.5
+  Aversion         -0.6         +0.3          +0.1
+  Ira              -0.5         +0.7          +0.5
+  Anticipacion     +0.3         +0.4          +0.2
+
+Opcion B (la usada en este proyecto): 4 ejes de Plutchik, 3 espaciales
+  Emocion        (X, Y, Z)        W
+  Alegria        (+1,  0,  0)
+  Tristeza       (-1,  0,  0)
+  Confianza      ( 0, +1,  0)
+  Aversion       ( 0, -1,  0)
+  Ira            ( 0,  0, +1)
+  Miedo          ( 0,  0, -1)
+  Anticipacion   origen            +1
+  Sorpresa       origen            -1
+
+
+---------------------------------------------------------------------
+ANEXO B. COMPLEMENTOS MATEMATICOS DE LA ETAPA INICIAL
+---------------------------------------------------------------------
+B1. Concavidad de la eficiencia (estancamiento)
+  Sea N(x) el numerador y D(x) el denominador de la eficiencia, y
+  r(x) = ( suma H_Pi * A_i * M ) / ( suma H_Ri )   (tasa instantanea).
+      d Eficiencia / dx = ( D'(x) / D(x) ) * ( r(x) - Eficiencia(x) )
+  - Despegando:  r > Eficiencia  -> la curva sube (convexa si r crece).
+  - Estancada:   r tiende a Eficiencia -> pendiente tiende a 0 (concava).
+  - Cayendo:     r < Eficiencia  -> la curva baja.
+  Un deterioro emocional (menos V, C, E o mas |R|) baja M, luego r, y la
+  curva se aplana: asi se reproduce el caso del 5 %.
+
+B2. Agregacion de una empresa a partir de personas
+  e_empresa(t) = suma_j ( w_j * e_j(t) ),   con suma_j w_j = 1
+  y luego se aplican los mismos pasos (ejes, punto, filtro).
+
+B3. Punto emocional acumulado (DESCARTADO)
+  Se propuso P(X) = Integral p(t) * rho(t) dt / Integral rho(t) dt, con
+  rho = horas reales. Se descarto porque las emociones varian con
+  eventos, no con los dias; en su lugar se usa la foto estatica o la
+  version por eventos de la seccion 3.
+
+B4. Dinamica emocional (extension opcional)
+  de_k/dt = -lambda_k * ( e_k - e_k_base ) + estimulos_k(t)
+
+
+---------------------------------------------------------------------
+ANEXO C. CODIGO MATLAB COMPLETO (emocion_empresas.m)
+---------------------------------------------------------------------
+%% PUNTO EMOCIONAL DE EMPRESAS EN 3D  (modelo Plutchik reducido a 4 ejes)
+% Orden de emociones: alegria, confianza, miedo, sorpresa, tristeza, aversion, ira, anticipacion
+clear; clc; close all;
+
+emo = {'Alegria','Confianza','Miedo','Sorpresa','Tristeza','Aversion','Ira','Anticipacion'};
+
+%% 1. PARAMETROS (supuestos: hay que calibrarlos con datos reales de ventas)
+% Senales (columnas de W): tono web positivo, noticias negativas, crecimiento, riesgo sectorial
+W = [ 1.5 -1.0  0.8 -0.3;    % alegria
+      1.2 -1.5  0.5 -0.5;    % confianza
+     -0.3  1.0 -0.4  1.5;    % miedo
+      0.2  0.5  0.3  0.4;    % sorpresa
+     -1.0  1.2 -0.8  0.3;    % tristeza
+     -0.5  0.8 -0.3  0.6;    % aversion
+     -0.4  1.0 -0.2  0.5;    % ira
+      0.6 -0.2  1.6  0.0];   % anticipacion
+b = zeros(8,1);              % linea base
+T = 0.5;                     % temperatura del softmax
+
+% Afinidad del producto con cada emocion, en [-1,1]
+A = [0.5 0.6 -0.2 0.1 -0.4 -0.5 -0.6 0.8]';
+
+% Umbrales del filtro
+th1 = 0.25;   % probabilidad minima de la emocion principal
+th2 = 0.05;   % claridad minima (principal - secundaria)
+thS = 0.20;   % puntaje de venta minimo
+
+%% 2. SENALES DE LAS EMPRESAS (aqui simuladas; reemplaza por tus datos, valores en [0,1])
+rng(1);
+N = 40;
+s = rand(N,4);                       % N empresas x 4 senales
+
+%% 3. CALCULO
+Z = b + W*s';                        % 8 x N  (puntajes)
+E = exp(Z/T);
+P = E ./ sum(E,1);                   % softmax por columna: probabilidades p_k
+
+D = [ 1 0  0  0 -1  0 0 0;           % x = alegria - tristeza
+      0 1  0  0  0 -1 0 0;           % y = confianza - aversion
+      0 0 -1  0  0  0 1 0;           % z = ira - miedo
+      0 0  0 -1  0  0 0 1];          % w = anticipacion - sorpresa
+XYZW = D*P;
+x = XYZW(1,:); y = XYZW(2,:); z = XYZW(3,:); w = XYZW(4,:);
+
+Sc = (A'*P);                         % puntaje de venta
+
+[ps, idx] = sort(P,'descend');
+p1 = ps(1,:);  delta = ps(1,:) - ps(2,:);
+pasa = (p1 >= th1) & (delta >= th2) & (Sc >= thS);
+
+%% 4. TABLA DE RESULTADOS
+fprintf('Emp | Principal      | Secundaria     | Delta | Venta | Pasa\n');
+for n = 1:N
+    fprintf('%3d | %-14s | %-14s | %.2f  | %5.2f | %d\n', n, ...
+        emo{idx(1,n)}, emo{idx(2,n)}, delta(n), Sc(n), pasa(n));
+end
+fprintf('\nEmpresas que pasan el filtro: %d de %d\n', sum(pasa), N);
+
+%% 5. GRAFICA 3D
+sz = 40 + 300*(Sc - min(Sc))/(max(Sc) - min(Sc) + eps);   % tamano = puntaje de venta
+
+figure('Color','w'); hold on; grid on; box on;
+scatter3(x(~pasa), y(~pasa), z(~pasa), 25, [0.7 0.7 0.7], 'filled', 'MarkerFaceAlpha',0.5);
+scatter3(x(pasa),  y(pasa),  z(pasa),  sz(pasa), w(pasa), 'filled', 'MarkerEdgeColor','k');
+colormap(turbo); cb = colorbar; cb.Label.String = 'w: Sorpresa (-) <-> Anticipacion (+)';
+clim([-0.6 0.6]);
+
+% Ejes y limites (los puntos viven en un octaedro: |x|+|y|+|z|+|w| <= 1)
+L = max(0.6, ceil(max(abs([x y z]))*10)/10);   % se expande si T bajo saca puntos del rango
+axis([-L L -L L -L L]); axis vis3d;
+plot3([-L L],[0 0],[0 0],'k','LineWidth',1);
+plot3([0 0],[-L L],[0 0],'k','LineWidth',1);
+plot3([0 0],[0 0],[-L L],'k','LineWidth',1);
+xlabel('X: Tristeza <-> Alegria');
+ylabel('Y: Aversion <-> Confianza');
+zlabel('Z: Miedo <-> Ira');
+title('Postura emocional estimada de empresas (gris = descartadas por el filtro)');
+view(35,25); rotate3d on;
+
+% Etiquetas de las empresas que pasan
+ids = find(pasa);
+for n = ids
+    text(x(n), y(n), z(n)+0.02, sprintf('%d', n), 'FontSize', 8);
+end
+
+
+=====================================================================
+FIN DEL RESUMEN
+=====================================================================
