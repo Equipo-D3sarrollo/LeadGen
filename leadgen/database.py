@@ -83,6 +83,7 @@ COLUMNAS_NUEVAS = [
     ("pasa_filtro", "INTEGER"), ("score_final", "REAL"),
     # Fase 5 - diagnóstico legible (Capa 4)
     ("diagnostico", "TEXT"),
+    ("diagnostico_origen", "TEXT"),   # "ia" | "reglas"; NULL = anterior a esta columna (origen desconocido)
 ]
 
 ESQUEMA_CONTACTOS = """
@@ -163,6 +164,20 @@ def obtener_todas(conn: sqlite3.Connection) -> list[sqlite3.Row]:
     return conn.execute(
         "SELECT * FROM empresas ORDER BY COALESCE(score_final, -1) DESC, lead_score DESC"
     ).fetchall()
+
+
+def es_excluida(fila) -> bool:
+    """Página del directorio (es_empresa=0) o fuera del mercado objetivo: no es un prospecto.
+    Filas anteriores a la Fase 2 (columnas en NULL) se consideran válidas."""
+    return fila["es_empresa"] == 0 or bool(fila["fuera_de_mercado"])
+
+
+def separar_prospectos(filas) -> tuple[list, list]:
+    """(válidas, excluidas), conservando el orden recibido (score_final desc de obtener_todas)."""
+    validas, excluidas = [], []
+    for f in filas:
+        (excluidas if es_excluida(f) else validas).append(f)
+    return validas, excluidas
 
 
 # ---------------------------------------------------------------------------

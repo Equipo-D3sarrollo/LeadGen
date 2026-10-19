@@ -78,16 +78,26 @@ def cmd_reprocesar(args: argparse.Namespace) -> None:
     import pandas as pd
     from leadgen import catalogo, reprocesar
 
+    def avisar_conservados(filas):
+        motivos = [reprocesar.motivo_conservar_diagnostico(f, args.rediagnosticar_antiguos) for f in filas]
+        if motivos.count("ia"):
+            print(f"{motivos.count('ia')} diagnósticos generados por IA conservados.")
+        if motivos.count("antiguo"):
+            print(f"{motivos.count('antiguo')} diagnósticos antiguos (origen desconocido) conservados; "
+                  "usa --rediagnosticar-antiguos para regenerarlos por reglas.")
+
     cat = catalogo.cargar_catalogo(args.catalogo)
     if args.excel:
         filas = pd.read_excel(args.excel).to_dict("records")
-        salida = reprocesar.reprocesar_filas(filas, cat)
+        avisar_conservados(filas)
+        salida = reprocesar.reprocesar_filas(filas, cat, rediagnosticar_antiguos=args.rediagnosticar_antiguos)
         ruta = export.exportar_excel(salida, args.salida or "leads_analizados.xlsx")
         print(f"{len(salida)} empresas reprocesadas -> {Path(ruta).resolve()}")
         return
     with database.conectar(args.db) as conn:
         filas = [dict(f) for f in database.obtener_todas(conn)]
-        salida = reprocesar.reprocesar_filas(filas, cat)
+        avisar_conservados(filas)
+        salida = reprocesar.reprocesar_filas(filas, cat, rediagnosticar_antiguos=args.rediagnosticar_antiguos)
         for f in salida:
             f.pop("id", None)
             f.pop("lead_score_original", None)
@@ -168,6 +178,9 @@ def main() -> None:
     p_rep = subparsers.add_parser("reprocesar", help="Aplica Fases 2-5 a leads ya guardados, sin scraping")
     p_rep.add_argument("--excel", help="Excel exportado a reprocesar (si se omite, usa la base de datos)")
     p_rep.add_argument("--salida", help="Excel de salida (solo con --excel)")
+    p_rep.add_argument("--rediagnosticar-antiguos", action="store_true",
+                       help="Regenera por reglas los diagnósticos antiguos de origen desconocido "
+                            "(los generados por IA nunca se sobrescriben)")
     p_rep.set_defaults(func=cmd_reprocesar)
 
     p_con = subparsers.add_parser("contacto", help="Registra una oferta hecha a una empresa y su resultado")

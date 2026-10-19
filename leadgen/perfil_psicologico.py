@@ -166,6 +166,15 @@ def analizar(
     r.entropia = round(-sum(v * math.log(v) for v in p if v > 0), 4)
     r.intent_pct = lectura_intent(perfil)
 
+    # Excluidas (página del directorio / fuera de mercado): se conserva el perfil descriptivo,
+    # pero no se les asigna producto, compatibilidad ni score final: no son prospectos.
+    if not es_empresa:
+        r.excluida = "no es una ficha de empresa (página del directorio)"
+    elif fuera_de_mercado:
+        r.excluida = f"fuera del mercado objetivo ({config.PAIS_OBJETIVO})"
+    if r.excluida:
+        return r
+
     for prod in catalogo.get("productos", []):
         S, pct = puntaje_venta(p, prod["afinidad"])
         umbral = prod.get("umbral_s_pct") or config.UMBRAL_S_PCT
@@ -184,14 +193,6 @@ def analizar(
         r.compatibilidad_pct = r.productos[mejor]["compatibilidad_pct"]
         r.fit_pct = r.productos[mejor]["fit_pct"]
         r.pasa_filtro = r.productos[mejor]["pasa_filtro"]
-
-    if not es_empresa:
-        r.excluida = "no es una ficha de empresa (página del directorio)"
-    elif fuera_de_mercado:
-        r.excluida = f"fuera del mercado objetivo ({config.PAIS_OBJETIVO})"
-    if r.excluida:
-        r.pasa_filtro = False
-        return r
 
     if r.compatibilidad_pct is not None:
         lead_norm = 100 * min(float(lead_score or 0), config.LEAD_SCORE_MAX) / config.LEAD_SCORE_MAX

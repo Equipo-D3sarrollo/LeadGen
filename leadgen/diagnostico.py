@@ -124,9 +124,15 @@ EVIDENCIA:
 
 
 def diagnosticar(perfil: Perfil, res: ResultadoPsico, e: dict, usar_ia: bool = False, cliente=None) -> str:
+    return diagnosticar_con_origen(perfil, res, e, usar_ia=usar_ia, cliente=cliente)[0]
+
+
+def diagnosticar_con_origen(perfil: Perfil, res: ResultadoPsico, e: dict, usar_ia: bool = False,
+                            cliente=None) -> tuple[str, str]:
+    """(texto, origen). origen = "ia" solo si la IA devolvió texto; cualquier respaldo es "reglas"."""
     base = diagnostico_por_reglas(perfil, res, e)
     if res.excluida or not usar_ia or not (cliente or os.environ.get("ANTHROPIC_API_KEY")):
-        return base
+        return base, "reglas"
     try:
         if cliente is None:
             import anthropic
@@ -144,7 +150,7 @@ def diagnosticar(perfil: Perfil, res: ResultadoPsico, e: dict, usar_ia: bool = F
             messages=[{"role": "user", "content": PROMPT_DIAGNOSTICO.format(evidencia=json.dumps(evidencia, ensure_ascii=False))}],
         )
         texto = r.content[0].text.strip()
-        return texto or base
+        return (texto, "ia") if texto else (base, "reglas")
     except Exception as ex:
         print(f"[diagnostico] Falló la IA, uso reglas: {ex}")
-        return base
+        return base, "reglas"
