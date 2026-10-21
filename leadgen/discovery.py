@@ -143,8 +143,12 @@ def descubrir_empresas(
     resultados: list[EmpresaDescubierta] = []
     url_actual = url_directorio
     paginas_recorridas = 0
+    paginas_vistas: set[str] = set()
 
     while url_actual and paginas_recorridas < max_paginas:
+        if url_actual in paginas_vistas:
+            break
+        paginas_vistas.add(url_actual)
         soup = _get(url_actual)
         if soup is None:
             break
