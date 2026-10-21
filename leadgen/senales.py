@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections import Counter
+from collections import Counter, OrderedDict
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -34,6 +34,14 @@ def _sin_tildes(txt: str) -> str:
 # ---------------------------------------------------------------------------
 # Antigüedad de dominio (RDAP)
 # ---------------------------------------------------------------------------
+_MAX_CACHE_RDAP = 256
+_CACHE_RDAP: OrderedDict[str, float | None] = OrderedDict()
+
+
+def _limpiar_cache_rdap() -> None:
+    _CACHE_RDAP.clear()
+
+
 def fecha_registro_desde_rdap(datos: dict) -> datetime | None:
     for ev in datos.get("events", []) or []:
         if ev.get("eventAction") == "registration" and ev.get("eventDate"):
@@ -48,21 +56,36 @@ def antiguedad_dominio(url_sitio: str, timeout: int = 8) -> float | None:
     """Años de antigüedad del dominio, o None si no se pudo consultar."""
     if not url_sitio:
         return None
-    dominio = urlparse(url_sitio if "://" in url_sitio else "https://" + url_sitio).netloc.replace("www.", "")
+    dominio = urlparse(
+        url_sitio if "://" in url_sitio else "https://" + url_sitio
+    ).netloc.lower()
+    if dominio.startswith("www."):
+        dominio = dominio[4:]
     if not dominio:
         return None
+    if dominio in _CACHE_RDAP:
+        _CACHE_RDAP.move_to_end(dominio)
+        return _CACHE_RDAP[dominio]
+
+    resultado: float | None = None
     try:
         import requests
         from . import config
         r = requests.get(f"https://rdap.org/domain/{dominio}", headers=config.HEADERS, timeout=timeout)
         if not r.ok:
-            return None
-        fecha = fecha_registro_desde_rdap(r.json())
+            fecha = None
+        else:
+            fecha = fecha_registro_desde_rdap(r.json())
     except Exception:
-        return None
-    if not fecha:
-        return None
-    return round((datetime.now(timezone.utc) - fecha).days / 365.25, 1)
+        fecha = None
+    if fecha:
+        resultado = round((datetime.now(timezone.utc) - fecha).days / 365.25, 1)
+
+    _CACHE_RDAP[dominio] = resultado
+    _CACHE_RDAP.move_to_end(dominio)
+    if len(_CACHE_RDAP) > _MAX_CACHE_RDAP:
+        _CACHE_RDAP.popitem(last=False)
+    return resultado
 
 
 # ---------------------------------------------------------------------------
