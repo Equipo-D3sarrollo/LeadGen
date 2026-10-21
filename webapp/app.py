@@ -132,6 +132,7 @@ def _verificar_origen_post():
 
 # Estado simple en memoria para saber si hay un procesamiento en curso
 ESTADO = {"procesando": False, "url": "", "progreso": "", "error": ""}
+_ESTADO_LOCK = threading.Lock()
 
 
 def _obtener_filas():
@@ -159,10 +160,11 @@ def _calcular_stats(validas, excluidas):
 
 
 def _correr_pipeline_en_hilo(url, selectores_directorio, selectores_ficha, usar_ia, usar_navegador, max_resultados_maps):
-    ESTADO["procesando"] = True
-    ESTADO["url"] = url
-    ESTADO["progreso"] = "Iniciando..."
-    ESTADO["error"] = ""
+    with _ESTADO_LOCK:
+        ESTADO["procesando"] = True
+        ESTADO["url"] = url
+        ESTADO["progreso"] = "Iniciando..."
+        ESTADO["error"] = ""
     try:
         ejecutar_pipeline(
             url_directorio=url,
@@ -174,14 +176,17 @@ def _correr_pipeline_en_hilo(url, selectores_directorio, selectores_ficha, usar_
             db_path=DB_PATH,
             verbose=True,
         )
-        ESTADO["progreso"] = "Completado"
+        with _ESTADO_LOCK:
+            ESTADO["progreso"] = "Completado"
     except Exception:
         # El detalle (excepción + traza) va solo al registro del servidor; al usuario, un mensaje genérico
         app.logger.exception("Error procesando %s", url)
-        ESTADO["error"] = "Error interno al procesar. El detalle quedó en el registro del servidor."
-        ESTADO["progreso"] = "Error"
+        with _ESTADO_LOCK:
+            ESTADO["error"] = "Error interno al procesar. El detalle quedó en el registro del servidor."
+            ESTADO["progreso"] = "Error"
     finally:
-        ESTADO["procesando"] = False
+        with _ESTADO_LOCK:
+            ESTADO["procesando"] = False
 
 
 @app.route("/", methods=["GET"])
@@ -196,12 +201,16 @@ def index():
 @app.route("/procesar", methods=["POST"])
 @login_requerido
 def procesar():
-    if ESTADO["procesando"]:
-        flash("Ya hay un procesamiento en curso, espera a que termine.", "error")
-        return redirect(url_for("index"))
+    with _ESTADO_LOCK:
+        if ESTADO["procesando"]:
+            flash("Ya hay un procesamiento en curso, espera a que termine.", "error")
+            return redirect(url_for("index"))
+        ESTADO["procesando"] = True
 
     url = request.form.get("url", "").strip()
     if not url:
+        with _ESTADO_LOCK:
+            ESTADO["procesando"] = False
         flash("Debes escribir una URL.", "error")
         return redirect(url_for("index"))
 
@@ -218,18 +227,27 @@ def procesar():
     if config_texto:
         try:
             cfg = json.loads(config_texto)
+            if not isinstance(cfg, dict):
+                raise ValueError("la configuración debe ser un objeto JSON")
             selectores_directorio = cfg.get("selectores_directorio", {})
             selectores_ficha = cfg.get("selectores_ficha", {})
-        except json.JSONDecodeError as e:
+        except (json.JSONDecodeError, ValueError) as e:
+            with _ESTADO_LOCK:
+                ESTADO["procesando"] = False
             flash(f"El JSON de configuración no es válido: {e}", "error")
             return redirect(url_for("index"))
 
-    hilo = threading.Thread(
-        target=_correr_pipeline_en_hilo,
-        args=(url, selectores_directorio, selectores_ficha, usar_ia, usar_navegador, max_resultados_maps),
-        daemon=True,
-    )
-    hilo.start()
+    try:
+        hilo = threading.Thread(
+            target=_correr_pipeline_en_hilo,
+            args=(url, selectores_directorio, selectores_ficha, usar_ia, usar_navegador, max_resultados_maps),
+            daemon=True,
+        )
+        hilo.start()
+    except Exception:
+        with _ESTADO_LOCK:
+            ESTADO["procesando"] = False
+        raise
 
     flash(f"Procesando {url}... refresca la página en unos segundos para ver el progreso.", "ok")
     return redirect(url_for("index"))
@@ -239,7 +257,8 @@ def procesar():
 @login_requerido
 def estado():
     """Endpoint simple para consultar el progreso vía JS (polling)."""
-    return ESTADO
+    with _ESTADO_LOCK:
+        return dict(ESTADO)
 
 
 @app.route("/exportar/<formato>")
@@ -268,6 +287,9 @@ def exportar(formato):
 @login_requerido
 def limpiar():
     """Borra toda la base de datos (útil para empezar de cero en pruebas)."""
+    with _ESTADO_LOCK:
+        if ESTADO["procesando"]:
+            return Response("No se puede limpiar mientras hay un procesamiento en curso.", 409)
     if os.path.exists(DB_PATH):
         os.remove(DB_PATH)
     flash("Base de datos limpiada.", "ok")
@@ -279,6 +301,8 @@ def _opciones_servidor() -> tuple[str, int, bool]:
     host = os.environ.get("LEADGEN_HOST", "127.0.0.1")
     puerto = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("LEADGEN_DEBUG") == "1"
+    if host not in ("127.0.0.1", "localhost") and (not LEADGEN_USER or not LEADGEN_PASSWORD):
+        raise RuntimeError("LEADGEN_USER y LEADGEN_PASSWORD son obligatorias al exponer la aplicación.")
     return host, puerto, debug
 
 

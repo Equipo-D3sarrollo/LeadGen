@@ -54,7 +54,18 @@ def test_opciones_servidor_por_entorno(web, monkeypatch):
     monkeypatch.setenv("LEADGEN_HOST", "0.0.0.0")
     monkeypatch.setenv("PORT", "8080")
     monkeypatch.setenv("LEADGEN_DEBUG", "1")
+    monkeypatch.setattr(modulo, "LEADGEN_USER", "equipo")
+    monkeypatch.setattr(modulo, "LEADGEN_PASSWORD", "secreto")
     assert modulo._opciones_servidor() == ("0.0.0.0", 8080, True)
+
+
+def test_opciones_servidor_remoto_exige_credenciales(web, monkeypatch):
+    modulo, _ = web
+    monkeypatch.setenv("LEADGEN_HOST", "0.0.0.0")
+    monkeypatch.setattr(modulo, "LEADGEN_USER", None)
+    monkeypatch.setattr(modulo, "LEADGEN_PASSWORD", None)
+    with pytest.raises(RuntimeError, match="LEADGEN_USER y LEADGEN_PASSWORD"):
+        modulo._opciones_servidor()
 
 
 def test_debug_solo_con_valor_explicito(web, monkeypatch):
@@ -152,9 +163,55 @@ def test_origen_de_la_lista_permitida(web, monkeypatch):
     assert not os.path.exists(db)
 
 
+def test_limpiar_rechaza_proceso_activo(web):
+    modulo, db = web
+    modulo.ESTADO["procesando"] = True
+    r = modulo.app.test_client().post("/limpiar", headers={"Origin": "http://localhost"})
+    assert r.status_code == 409
+    assert os.path.exists(db)
+    assert _filas(db) == 1
+
+
+def test_procesar_reserva_estado_antes_de_crear_hilo(web, monkeypatch):
+    modulo, _ = web
+    hilos = []
+    monkeypatch.setattr(modulo, "ejecutar_pipeline", lambda **kwargs: None)
+
+    class HiloFalso:
+        def __init__(self, target, **kwargs):
+            self.target = target
+            hilos.append(self)
+
+        def start(self):
+            return None
+
+    monkeypatch.setattr(modulo.threading, "Thread", HiloFalso)
+    cliente = modulo.app.test_client()
+    cabeceras = {"Origin": "http://localhost"}
+    primero = cliente.post("/procesar", data={"url": "https://directorio.example"}, headers=cabeceras)
+    segundo = cliente.post("/procesar", data={"url": "https://otro.example"}, headers=cabeceras)
+    assert primero.status_code == 302
+    assert segundo.status_code == 302
+    assert len(hilos) == 1
+    assert modulo.ESTADO["procesando"] is True
+    hilos[0].target("https://directorio.example", {}, {}, False, False, 40)
+    assert modulo.ESTADO["procesando"] is False
+
+
 def test_procesar_mismo_origen_sin_url_no_lanza_pipeline(web):
     modulo, _ = web
     r = modulo.app.test_client().post("/procesar", data={"url": ""}, headers={"Origin": "http://localhost"})
+    assert r.status_code == 302
+    assert modulo.ESTADO["procesando"] is False
+
+
+def test_procesar_rechaza_configuracion_json_no_objeto(web):
+    modulo, _ = web
+    r = modulo.app.test_client().post(
+        "/procesar",
+        data={"url": "https://directorio.example", "config_json": "[]"},
+        headers={"Origin": "http://localhost"},
+    )
     assert r.status_code == 302
     assert modulo.ESTADO["procesando"] is False
 

@@ -1,4 +1,4 @@
-import math, json, subprocess, sys
+import math, json, os, subprocess, sys
 from leadgen import perfil, perfil_psicologico as pp, catalogo, config, diagnostico, pipeline, google_maps, web_analysis, database
 from leadgen.scraper import EmpresaCruda
 
@@ -69,16 +69,74 @@ def test_pipeline_maps_sin_red(tmp_path, monkeypatch):
     assert dos["tamano_estimado"] == "mediana"
 
 def test_cli_reprocesar_excel_y_contacto(tmp_path):
-    out = tmp_path/"a.xlsx"
-    r = subprocess.run([sys.executable, "main.py", "--catalogo", str(tmp_path/"x.json"), "reprocesar", "--excel",
-                        "datos/leads_export.xlsx", "--salida", str(out)], capture_output=True, text=True)
-    assert r.returncode == 0, r.stderr
     import pandas as pd
-    df = pd.read_excel(out); assert len(df) == 484 and df.columns[0] == "nombre" and "diagnostico" in df
+
+    filas_entrada = [
+        {
+            "nombre": "Empresa Sintetica A",
+            "url_perfil": "https://maps.example/sintetica-a",
+            "direccion": "Direccion sintetica 1",
+            "ciudad": "Ciudad Sintetica",
+            "departamento": "Departamento Sintetico",
+            "telefono": "3001234567",
+            "whatsapp": "",
+            "correo": "a@example.invalid",
+            "facebook": "",
+            "instagram": "",
+            "sitio_web": "",
+            "horario": "",
+            "descripcion": "Descripcion de prueba",
+            "categoria": "Servicios",
+            "rating": 4.5,
+            "numero_resenas": 20,
+            "datos_invalidos": "",
+        },
+        {
+            "nombre": "Empresa Sintetica B",
+            "url_perfil": "https://maps.example/sintetica-b",
+            "direccion": "",
+            "ciudad": "",
+            "departamento": "",
+            "telefono": "",
+            "whatsapp": "",
+            "correo": "",
+            "facebook": "",
+            "instagram": "",
+            "sitio_web": "",
+            "horario": "",
+            "descripcion": "",
+            "categoria": "Servicios",
+            "rating": None,
+            "numero_resenas": None,
+            "datos_invalidos": "",
+        },
+    ]
+    entrada = tmp_path / "entrada.xlsx"
+    pd.DataFrame(filas_entrada).to_excel(entrada, index=False)
+    out = tmp_path/"a.xlsx"
+    entorno = os.environ.copy()
+    entorno.pop("ANTHROPIC_API_KEY", None)
+    entorno["PYTHONDONTWRITEBYTECODE"] = "1"
+    r = subprocess.run([sys.executable, "main.py", "--catalogo", str(tmp_path/"x.json"), "reprocesar", "--excel",
+                        str(entrada), "--salida", str(out)], capture_output=True, text=True, env=entorno)
+    assert r.returncode == 0, r.stderr
+    df = pd.read_excel(out)
+    assert len(df) == len(filas_entrada)
+    assert df.columns[0] == "nombre" and "diagnostico" in df
+    assert df["nombre"].tolist() == [fila["nombre"] for fila in filas_entrada]
     db = str(tmp_path/"c.db")
     with database.conectar(db) as conn:
         database.guardar_o_actualizar(conn, {"url_perfil":"u1","nombre":"E"})
-    r = subprocess.run([sys.executable, "main.py", "--db", db, "contacto", "u1", "diseno_web", "--resultado", "reunion"], capture_output=True, text=True)
+    r = subprocess.run([sys.executable, "main.py", "--db", db, "contacto", "u1", "diseno_web", "--resultado", "reunion"],
+                       capture_output=True, text=True, env=entorno)
     assert r.returncode == 0, r.stderr
-    r = subprocess.run([sys.executable, "main.py", "--db", db, "--catalogo", str(tmp_path/"x.json"), "reprocesar"], capture_output=True, text=True)
+    with database.conectar(db) as conn:
+        contacto = conn.execute(
+            "SELECT url_perfil, producto_id, resultado FROM contactos WHERE url_perfil = ?",
+            ("u1",),
+        ).fetchone()
+    assert contacto is not None, "El comando terminó correctamente, pero no se encontró el contacto en SQLite"
+    assert tuple(contacto) == ("u1", "diseno_web", "reunion")
+    r = subprocess.run([sys.executable, "main.py", "--db", db, "--catalogo", str(tmp_path/"x.json"), "reprocesar"],
+                       capture_output=True, text=True, env=entorno)
     assert r.returncode == 0, r.stderr
