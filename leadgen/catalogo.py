@@ -22,8 +22,8 @@ la tienda de un aliado, etc.). Este módulo:
      búsquedas sugeridas para Google Maps/directorios y productos
      complementarios (venta cruzada).
 
-Dos motores, igual que ai_analysis.py:
-  - Con ANTHROPIC_API_KEY: Claude lee el texto del catálogo y devuelve
+  Dos motores:
+  - Con OPENAI_API_KEY: OpenAI lee el texto del catálogo y devuelve
     los productos en JSON (con justificación por vector).
   - Sin API key (o si la API falla): reglas por familias de producto
     (léxico de palabras clave + arquetipos). Nunca rompe el pipeline.
@@ -39,13 +39,15 @@ import json
 import os
 import re
 import unicodedata
+import time
+import uuid
 from collections import deque
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urldefrag, urljoin, urlparse
 
-from . import config
+from . import ai_provider, ai_usage, config
 
 # ---------------------------------------------------------------------------
 # Familias de producto (arquetipos). Supuestos iniciales: ver DECISIONES.md
@@ -467,13 +469,13 @@ def construir_por_reglas(bloques: list[Bloque]) -> list[Producto]:
 
 
 # ---------------------------------------------------------------------------
-# 3b) Motor con IA (Claude)
+# 3b) Motor con IA (OpenAI)
 # ---------------------------------------------------------------------------
-PROMPT_CATALOGO = """Eres analista comercial B2B en Colombia. Abajo está el texto de las
-páginas del catálogo de productos/servicios de una empresa (Telcobras o un aliado).
+PROMPT_CATALOGO = """Eres analista comercial B2B en Colombia. Usa únicamente el texto
+suministrado del catálogo.
 
 Tarea:
-1) Identifica cada producto o servicio REAL que se vende (no secciones como "Nosotros").
+1) Identifica cada producto o servicio REAL que se vende; no incluyas secciones institucionales.
 2) Para cada uno define el CLIENTE IDEAL con 6 dimensiones (0-100):
    madurez_digital (qué tan digitalizada está la empresa que lo compra),
    dolor_urgencia (cuánto le duele hoy la carencia que el producto resuelve),
@@ -486,23 +488,79 @@ Tarea:
    confianza (estabilidad), miedo (riesgo percibido), sorpresa (cambio inesperado),
    tristeza (estancamiento), aversion (rechazo, cerrado a proveedores), ira (frustración con
    un problema actual), anticipacion (planea crecer).
-4) INVESTIGA OPCIONES: sectores objetivo concretos, búsquedas sugeridas para Google Maps
-   ("<tipo de negocio> en <ciudad colombiana>"), productos complementarios, y en
-   "opciones_adicionales" otras oportunidades de venta que el catálogo sugiere aunque no las liste.
+4) Identifica sectores objetivo concretos, búsquedas sugeridas para Google Maps
+   ("<tipo de negocio> en <ciudad colombiana>"), productos complementarios y oportunidades
+   adicionales inferibles del texto suministrado.
 
+No inventes productos, características ni datos que no estén sustentados por el catálogo.
 Familias válidas: {familias}. Si ninguna aplica usa "otra".
-Responde SOLO con JSON válido, sin texto extra, con esta forma:
-{{"productos": [{{"nombre": "", "descripcion": "", "familia": "", "dolor_que_resuelve": "",
-  "sectores_objetivo": [], "tamano_empresa_objetivo": "", "vector_ideal": {{"madurez_digital": 0,
-  "dolor_urgencia": 0, "confianza_reputacion": 0, "dinamismo": 0, "apertura_comercial": 0,
-  "sofisticacion_marca": 0}}, "afinidad": {{"alegria": 0, "confianza": 0, "miedo": 0, "sorpresa": 0,
-  "tristeza": 0, "aversion": 0, "ira": 0, "anticipacion": 0}}, "consultas_busqueda": [],
-  "productos_complementarios": [], "justificacion": ""}}],
- "opciones_adicionales": [{{"oportunidad": "", "por_que": ""}}]}}
 
-TEXTO DEL CATÁLOGO (fuentes: {urls}):
+TEXTO DEL CATÁLOGO:
 {texto}
 """
+
+
+def _esquema_catalogo_ia() -> dict:
+    """Esquema de la parte del catálogo que la IA proporciona."""
+    producto = {
+        "type": "object",
+        "properties": {
+            "nombre": {"type": "string"},
+            "descripcion": {"type": "string"},
+            "familia": {"type": "string", "enum": [*FAMILIAS, "otra"]},
+            "dolor_que_resuelve": {"type": "string"},
+            "sectores_objetivo": {"type": "array", "items": {"type": "string"}},
+            "tamano_empresa_objetivo": {"type": "string"},
+            "vector_ideal": {
+                "type": "object",
+                "properties": {
+                    dimension: {"type": "number", "minimum": 0, "maximum": 100}
+                    for dimension in config.DIMENSIONES
+                },
+                "required": list(config.DIMENSIONES),
+                "additionalProperties": False,
+            },
+            "afinidad": {
+                "type": "object",
+                "properties": {
+                    emocion: {"type": "number", "minimum": -1, "maximum": 1}
+                    for emocion in config.EMOCIONES
+                },
+                "required": list(config.EMOCIONES),
+                "additionalProperties": False,
+            },
+            "consultas_busqueda": {"type": "array", "items": {"type": "string"}},
+            "productos_complementarios": {"type": "array", "items": {"type": "string"}},
+            "justificacion": {"type": "string"},
+        },
+        "required": [
+            "nombre", "descripcion", "familia", "dolor_que_resuelve",
+            "sectores_objetivo", "tamano_empresa_objetivo", "vector_ideal",
+            "afinidad", "consultas_busqueda", "productos_complementarios",
+            "justificacion",
+        ],
+        "additionalProperties": False,
+    }
+    return {
+        "type": "object",
+        "properties": {
+            "productos": {"type": "array", "items": producto},
+            "opciones_adicionales": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "oportunidad": {"type": "string"},
+                        "por_que": {"type": "string"},
+                    },
+                    "required": ["oportunidad", "por_que"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["productos", "opciones_adicionales"],
+        "additionalProperties": False,
+    }
 
 
 def _texto_para_ia(paginas: dict[str, str], limite: int = 28000) -> str:
@@ -563,17 +621,43 @@ def _validar_producto_ia(d: dict, urls: list[str]) -> Producto:
 
 def construir_con_ia(paginas: dict[str, str], cliente=None) -> tuple[list[Producto], list[dict]]:
     """Devuelve (productos, opciones_adicionales). Lanza excepción si falla (el llamador hace fallback)."""
-    if cliente is None:
-        import anthropic
-        cliente = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    ejecucion_id = str(uuid.uuid4())
+    inicio = time.perf_counter()
     urls = list(paginas)
     prompt = PROMPT_CATALOGO.format(
-        familias=", ".join(FAMILIAS), urls=", ".join(urls[:10]), texto=_texto_para_ia(paginas)
+        familias=", ".join(FAMILIAS), texto=_texto_para_ia(paginas)
     )
-    resp = cliente.messages.create(
-        model=config.CATALOGO_MODELO_IA, max_tokens=8000, messages=[{"role": "user", "content": prompt}]
+    try:
+        if cliente is None:
+            cliente = ai_provider.crear_cliente()
+        resp = cliente.responses.create(
+            model=config.CATALOGO_MODELO_IA,
+            max_output_tokens=config.CATALOGO_MAX_OUTPUT_TOKENS,
+            input=prompt,
+            text={
+                "format": {
+                    "type": "json_schema",
+                    "name": "catalogo_productos",
+                    "schema": _esquema_catalogo_ia(),
+                    "strict": True,
+                }
+            }
+        )
+    except Exception as error:
+        ai_usage.registrar_uso(
+            "catalogo", config.CATALOGO_MODELO_IA, None,
+            proveedor=config.PROVEEDOR_IA, estado="error",
+            duracion_ms=round((time.perf_counter() - inicio) * 1000),
+            ejecucion_id=ejecucion_id, tipo_error=type(error).__name__,
+        )
+        raise
+    ai_usage.registrar_uso(
+        "catalogo", config.CATALOGO_MODELO_IA, resp,
+        proveedor=config.PROVEEDOR_IA, estado="success",
+        duracion_ms=round((time.perf_counter() - inicio) * 1000),
+        ejecucion_id=ejecucion_id,
     )
-    datos = _extraer_json(resp.content[0].text)
+    datos = _extraer_json(ai_provider.extraer_texto(resp))
     productos = [_validar_producto_ia(p, urls) for p in datos.get("productos", []) if isinstance(p, dict)]
     return productos, list(datos.get("opciones_adicionales", []))
 
@@ -595,7 +679,7 @@ def leer_catalogo_desde_links(
     productos: list[Producto] = []
     opciones: list[dict] = []
     metodo = "reglas"
-    if usar_ia and (cliente_ia is not None or os.environ.get("ANTHROPIC_API_KEY")) and paginas:
+    if usar_ia and (cliente_ia is not None or os.environ.get(config.OPENAI_API_KEY_ENV)) and paginas:
         try:
             productos, opciones = construir_con_ia(paginas, cliente=cliente_ia)
             metodo = "ia"

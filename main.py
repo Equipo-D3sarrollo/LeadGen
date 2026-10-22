@@ -168,7 +168,7 @@ def main() -> None:
 
     p_cat = subparsers.add_parser("catalogo", help="Fase 1: lee el catálogo de productos desde uno o varios links")
     p_cat.add_argument("urls", nargs="*", help="Links del catálogo (páginas de servicios, PDF, tienda...)")
-    p_cat.add_argument("--ia", action="store_true", help="Usa Claude para leer el catálogo (requiere ANTHROPIC_API_KEY)")
+    p_cat.add_argument("--ia", action="store_true", help="Usa OpenAI para leer el catálogo (requiere OPENAI_API_KEY)")
     p_cat.add_argument("--navegador", action="store_true", help="Renderiza con Playwright (sitios con JavaScript)")
     p_cat.add_argument("--max-paginas", type=int, default=config.CATALOGO_MAX_PAGINAS)
     p_cat.add_argument("--reemplazar", action="store_true", help="No conserva productos anteriores (salvo nada)")

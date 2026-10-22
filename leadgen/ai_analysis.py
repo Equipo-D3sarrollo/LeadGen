@@ -6,18 +6,19 @@ MÓDULO 7 - IA (opcional)
 Genera una observación cualitativa sobre la calidad del sitio web,
 como "Este negocio podría aumentar conversiones con un rediseño
 moderno". Es 100% opcional: si no configuras una API key de
-Anthropic, el sistema sigue funcionando y simplemente se salta
-este módulo (deja el campo vacío).
+OpenAI, el sistema sigue funcionando mediante las reglas locales.
 
 Para activarlo:
-    1) pip install anthropic
-    2) export ANTHROPIC_API_KEY="tu-clave"
+    1) pip install openai
+    2) export OPENAI_API_KEY="tu-clave"
 """
 
 from __future__ import annotations
 
-import os
+import time
+import uuid
 
+from . import ai_provider, ai_usage, config
 from .web_analysis import AnalisisWeb
 
 PROMPT_BASE = """Eres un consultor de marketing digital. Con base en estos datos
@@ -42,15 +43,16 @@ def generar_observacion(analisis: AnalisisWeb) -> str:
     reglas simples si no hay API key configurada (para que el pipeline
     nunca se rompa por falta de este módulo opcional).
     """
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-
-    if not api_key:
-        return _observacion_por_reglas(analisis)
-
     try:
-        import anthropic
+        client = ai_provider.crear_cliente()
+    except RuntimeError as error:
+        if "No hay una clave de OpenAI" in str(error):
+            return _observacion_por_reglas(analisis)
+        raise
 
-        client = anthropic.Anthropic(api_key=api_key)
+    ejecucion_id = str(uuid.uuid4())
+    inicio = time.perf_counter()
+    try:
         prompt = PROMPT_BASE.format(
             https="Sí" if analisis.https else "No",
             tiempo=analisis.tiempo_carga_seg,
@@ -60,14 +62,30 @@ def generar_observacion(analisis: AnalisisWeb) -> str:
             puntaje=analisis.puntaje,
             cms=analisis.cms or "Ninguno detectado",
         )
-        respuesta = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=100,
-            messages=[{"role": "user", "content": prompt}],
+        respuesta = client.responses.create(
+            model=config.OPENAI_MODELO,
+            max_output_tokens=config.OBSERVACION_MAX_OUTPUT_TOKENS,
+            input=prompt,
         )
-        return respuesta.content[0].text.strip()
+        ai_usage.registrar_uso(
+            "observacion_web", config.OPENAI_MODELO, respuesta,
+            proveedor=config.PROVEEDOR_IA, estado="success",
+            duracion_ms=round((time.perf_counter() - inicio) * 1000),
+            ejecucion_id=ejecucion_id,
+        )
     except Exception as e:
+        ai_usage.registrar_uso(
+            "observacion_web", config.OPENAI_MODELO, None,
+            proveedor=config.PROVEEDOR_IA, estado="error",
+            duracion_ms=round((time.perf_counter() - inicio) * 1000),
+            ejecucion_id=ejecucion_id, tipo_error=type(e).__name__,
+        )
         print(f"[ai_analysis] Falló la llamada a la API, uso reglas simples: {e}")
+        return _observacion_por_reglas(analisis)
+    try:
+        return ai_provider.extraer_texto(respuesta).strip()
+    except Exception as e:
+        print(f"[ai_analysis] Respuesta no utilizable, uso reglas simples: {type(e).__name__}")
         return _observacion_por_reglas(analisis)
 
 

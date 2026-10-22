@@ -115,7 +115,7 @@ def test_cli_reprocesar_excel_y_contacto(tmp_path):
     pd.DataFrame(filas_entrada).to_excel(entrada, index=False)
     out = tmp_path/"a.xlsx"
     entorno = os.environ.copy()
-    entorno.pop("ANTHROPIC_API_KEY", None)
+    entorno.pop("OPENAI_API_KEY", None)
     entorno["PYTHONDONTWRITEBYTECODE"] = "1"
     r = subprocess.run([sys.executable, "main.py", "--catalogo", str(tmp_path/"x.json"), "reprocesar", "--excel",
                         str(entrada), "--salida", str(out)], capture_output=True, text=True, env=entorno)
