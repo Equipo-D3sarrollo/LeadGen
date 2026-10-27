@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="es" data-bs-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LeadGen — Panel</title>
+<!-- Dependencia externa: Tabler UI 1.6.1 desde jsDelivr CDN. -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/core@1.6.1/dist/css/tabler.min.css"
+      integrity="sha384-tT2UAGE9hxG/p5d0iGIvZ/s8El3nWWG3tfG02i8iOY5Pbf8cZZRVmcrrVs+JG5Vw"
+      crossorigin="anonymous">
+<style>
+  /* Tabler se usa en modo oscuro (data-bs-theme) solo como base; los componentes del panel
+     usan clases propias (lg-*) para no heredar colores claros de .table / .card. */
+  :root {
+    --fondo: #0e1110;
+    --fondo-barra: #131715;
+    --panel: #171c1a;
+    --panel-alto: #1d2421;
+    --campo: #101412;
+    --borde: #2c3531;
+    --borde-suave: #232a27;
+    --texto: #f1f4f2;
+    --texto-2: #c4ccc7;
+    --texto-3: #939e97;
+    --acento: #6fcf97;
+    --acento-hover: #86dba9;
+    --acento-activo: #5bb983;
+    --acento-tenue: rgba(111, 207, 151, .12);
+    --sobre-acento: #06120b;
+    --peligro: #f09191;
+    --peligro-tenue: rgba(240, 145, 145, .10);
+    --radio: 10px;
+    --mono: "SFMono-Regular", "Cascadia Mono", Consolas, monospace;
+  }
+  html[data-bs-theme="dark"] {
+    --tblr-body-bg: var(--fondo);
+    --tblr-body-color: var(--texto-2);
+    --tblr-border-color: var(--borde);
+    --tblr-primary: var(--acento);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh;
+    background: var(--fondo); color: var(--texto-2);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 14px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+  h1, h2, h3 { color: var(--texto); margin: 0; font-weight: 600; letter-spacing: -.01em; }
+  a { color: inherit; }
+  :focus-visible { outline: 2px solid var(--acento); outline-offset: 2px; }
+
+  /* --- Barra superior ----------------------------------------------------------- */
+  .lg-barra { background: var(--fondo-barra); border-bottom: 1px solid var(--borde-suave); }
+  .lg-barra-int { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 60px; }
+  .lg-marca { display: flex; align-items: center; gap: 12px; }
+  .lg-logo { width: 28px; height: 28px; flex: none; }
+  .lg-nombre { color: var(--texto); font-size: 17px; font-weight: 650; letter-spacing: -.02em; }
+  .lg-nombre span { color: var(--acento); }
+  .lg-separador { width: 1px; height: 18px; background: var(--borde); }
+  .lg-descriptor { color: var(--texto-3); font-size: 13px; }
+  .lg-estado {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 5px 11px; border: 1px solid var(--borde); border-radius: 999px;
+    color: var(--texto-2); font-size: 12px; font-weight: 500; white-space: nowrap;
+  }
+  .lg-estado::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--texto-3); }
+  .lg-estado.listo::before { background: var(--acento); }
+  .lg-estado.procesando { border-color: rgba(111, 207, 151, .45); color: var(--texto); }
+  .lg-estado.procesando::before { background: var(--acento); animation: lg-pulso 1.4s ease-in-out infinite; }
+  .lg-estado.error { border-color: rgba(240, 145, 145, .4); }
+  .lg-estado.error::before { background: var(--peligro); }
+  @keyframes lg-pulso { 50% { opacity: .35; } }
+  @media (prefers-reduced-motion: reduce) { .lg-estado.procesando::before { animation: none; } }
+
+  /* --- Estructura ------------------------------------------------------------------- */
+  .lg-main { padding-top: 32px; padding-bottom: 56px; }
+  .lg-intro { margin-bottom: 24px; }
+  .lg-intro h1 { font-size: 24px; line-height: 1.25; }
+  .lg-intro p { margin: 6px 0 0; color: var(--texto-3); font-size: 14px; }
+  .lg-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: 20px; align-items: start; }
+  .lg-panel { background: var(--panel); border: 1px solid var(--borde); border-radius: var(--radio); }
+  .lg-panel-cab { display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+                  padding: 16px 20px; border-bottom: 1px solid var(--borde-suave); }
+  .lg-panel-cab h2 { font-size: 15px; }
+  .lg-panel-cab small { color: var(--texto-3); font-size: 12px; }
+  .lg-panel-cuerpo { padding: 20px; }
+
+  /* --- Avisos ------------------------------------------------------------------------- */
+  .flash, .estado-procesando {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 12px 14px; margin-bottom: 16px; border-radius: 8px;
+    border: 1px solid var(--borde); border-left-width: 3px; font-size: 13px; color: var(--texto);
+    background: var(--panel);
+  }
+  .flash.ok, .estado-procesando { border-left-color: var(--acento); }
+  .flash.error { border-left-color: var(--peligro); background: var(--peligro-tenue); }
+  .estado-procesando strong { color: var(--texto); font-weight: 600; word-break: break-all; }
+
+  /* --- Formulario --------------------------------------------------------------------- */
+  .lg-campo + .lg-campo { margin-top: 18px; }
+  .lg-etiqueta { display: block; margin: 0 0 7px; color: var(--texto); font-size: 13px; font-weight: 550; }
+  .lg-form input[type=text], .lg-form textarea {
+    width: 100%; padding: 10px 12px;
+    background: var(--campo); color: var(--texto);
+    border: 1px solid var(--borde); border-radius: 8px;
+    font: inherit; font-size: 14px;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  .lg-form input[type=text]::placeholder, .lg-form textarea::placeholder { color: #6c7770; }
+  .lg-form input[type=text]:hover, .lg-form textarea:hover { border-color: #3a4540; }
+  .lg-form input[type=text]:focus, .lg-form textarea:focus {
+    outline: none; border-color: var(--acento); box-shadow: 0 0 0 3px var(--acento-tenue);
+  }
+  .lg-form textarea { min-height: 130px; resize: vertical; font-family: var(--mono); font-size: 12px; }
+  .lg-numero { max-width: 110px; }
+  .lg-ayuda { margin-top: 6px; color: var(--texto-3); font-size: 12px; }
+  .lg-opciones { display: grid; gap: 2px; margin-top: 18px; padding: 4px 0;
+                 border-top: 1px solid var(--borde-suave); border-bottom: 1px solid var(--borde-suave); }
+  .fila-checkbox { display: flex; align-items: flex-start; gap: 10px; padding: 9px 0; }
+  .fila-checkbox input { width: 16px; height: 16px; margin: 2px 0 0; flex: none; accent-color: var(--acento); }
+  .fila-checkbox label { margin: 0; color: var(--texto-2); font-size: 13px; line-height: 1.45; cursor: pointer; }
+  .avanzado summary { cursor: pointer; color: var(--texto-2); font-size: 13px; padding: 4px 0; }
+  .avanzado summary:hover { color: var(--texto); }
+  .avanzado[open] summary { margin-bottom: 8px; }
+  .lg-form-pie { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 20px; flex-wrap: wrap; }
+
+  /* --- Botones ------------------------------------------------------------------------- */
+  .lg-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    min-height: 36px; padding: 0 14px; margin: 0;
+    border: 1px solid var(--borde); border-radius: 8px;
+    background: var(--panel-alto); color: var(--texto);
+    font: inherit; font-size: 13px; font-weight: 550; text-decoration: none; cursor: pointer;
+    transition: background-color .15s, border-color .15s, color .15s;
+  }
+  .lg-btn:hover { background: #252e2a; border-color: #3a4540; color: var(--texto); }
+  .lg-btn:active { background: #1a201e; }
+  .lg-btn.primario { background: var(--acento); border-color: var(--acento); color: var(--sobre-acento); }
+  .lg-btn.primario:hover { background: var(--acento-hover); border-color: var(--acento-hover); color: var(--sobre-acento); }
+  .lg-btn.primario:active { background: var(--acento-activo); border-color: var(--acento-activo); }
+  .lg-btn.peligro { background: transparent; border-color: rgba(240, 145, 145, .35); color: var(--peligro); }
+  .lg-btn.peligro:hover { background: var(--peligro-tenue); border-color: var(--peligro); color: #f6aaaa; }
+  .lg-btn:disabled { opacity: .5; cursor: not-allowed; }
+  .lg-btn:disabled:hover { background: var(--acento); border-color: var(--acento); }
+  .lg-grupo { display: inline-flex; }
+  .lg-grupo .lg-btn { border-radius: 0; }
+  .lg-grupo .lg-btn + .lg-btn { margin-left: -1px; }
+  .lg-grupo .lg-btn:first-child { border-radius: 8px 0 0 8px; }
+  .lg-grupo .lg-btn:last-child { border-radius: 0 8px 8px 0; }
+  .lg-grupo .lg-btn:hover, .lg-grupo .lg-btn:focus-visible { position: relative; z-index: 1; }
+
+  /* --- Resumen --------------------------------------------------------------------------- */
+  .lg-clave { padding: 20px; border-bottom: 1px solid var(--borde-suave); }
+  .lg-clave-etiqueta { color: var(--texto-2); font-size: 13px; }
+  .lg-clave-valor { display: flex; align-items: baseline; gap: 8px; margin-top: 4px; }
+  .lg-clave-valor strong { color: var(--texto); font-size: 32px; font-weight: 650; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .lg-clave-valor span { color: var(--texto-3); font-size: 13px; }
+  .lg-proporcion { height: 4px; margin-top: 14px; border-radius: 2px; background: var(--borde-suave); overflow: hidden; }
+  .lg-proporcion span { display: block; height: 100%; background: var(--acento); }
+  .lg-metricas { margin: 0; padding: 6px 20px 10px; }
+  .lg-metricas div { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--borde-suave); }
+  .lg-metricas div:last-child { border-bottom: 0; }
+  .lg-metricas dt { color: var(--texto-2); font-weight: 400; font-size: 13px; }
+  .lg-metricas dd { margin: 0; color: var(--texto); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .lg-metricas .atenuada dt, .lg-metricas .atenuada dd { color: var(--texto-3); }
+
+  /* --- Resultados ------------------------------------------------------------------------ */
+  .lg-resultados { margin-top: 28px; }
+  .lg-res-cab { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+                padding: 18px 20px; border-bottom: 1px solid var(--borde-suave); }
+  .lg-res-cab h2 { font-size: 17px; }
+  .lg-res-cab p { margin: 3px 0 0; color: var(--texto-3); font-size: 12px; }
+  .lg-acciones { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .lg-acciones form { margin: 0; }
+  .lg-scroll { overflow-x: auto; }
+  .lg-tabla { width: 100%; min-width: 780px; border-collapse: collapse; color: var(--texto-2); font-size: 13px; }
+  .lg-tabla th {
+    position: sticky; top: 0; z-index: 1;
+    padding: 10px 16px; text-align: left; white-space: nowrap;
+    background: var(--panel-alto); color: var(--texto-2);
+    font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+    border-bottom: 1px solid var(--borde);
+  }
+  .lg-tabla td { padding: 12px 16px; border-bottom: 1px solid var(--borde-suave); vertical-align: middle; white-space: nowrap; }
+  .lg-tabla tr:last-child td { border-bottom: 0; }
+  .lg-tabla tbody tr:hover td { background: rgba(255, 255, 255, .025); }
+  .lg-tabla .empresa { color: var(--texto); font-weight: 550; white-space: normal; min-width: 200px; }
+  .lg-tabla .num { text-align: right; }
+  .score { display: inline-flex; align-items: center; gap: 10px; color: var(--texto); font-weight: 600; font-variant-numeric: tabular-nums; }
+  .lg-medidor { width: 56px; height: 4px; border-radius: 2px; background: var(--borde); overflow: hidden; }
+  .lg-medidor span { display: block; height: 100%; background: var(--acento); }
+  .badge { display: inline-flex; align-items: center; gap: 6px; padding: 0; background: none; font-size: 12px; font-weight: 500; }
+  .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; }
+  .badge.si { color: var(--texto); }
+  .badge.si::before { background: var(--acento); }
+  .badge.no { color: var(--texto-3); }
+  .badge.no::before { background: transparent; border: 1px solid var(--texto-3); }
+  .lg-vacio td { padding: 36px 16px; text-align: center; color: var(--texto-3); white-space: normal; }
+
+  .excluidas { margin-top: 16px; border: 1px solid var(--borde-suave); border-radius: var(--radio); background: var(--panel); }
+  .excluidas summary { padding: 14px 20px; color: var(--texto-2); }
+  .excluidas[open] summary { margin: 0; border-bottom: 1px solid var(--borde-suave); }
+  .excluidas .lg-tabla { min-width: 640px; }
+  .excluidas .lg-tabla td { color: var(--texto-3); }
+  .excluidas .url { font-family: var(--mono); font-size: 12px; }
+
+  @media (max-width: 960px) {
+    .lg-layout { grid-template-columns: minmax(0, 1fr); }
+  }
+  @media (max-width: 640px) {
+    .lg-descriptor, .lg-separador { display: none; }
+    .lg-main { padding-top: 22px; }
+    .lg-panel-cuerpo, .lg-clave { padding: 16px; }
+    .lg-panel-cab, .lg-res-cab { padding: 14px 16px; }
+    .lg-metricas { padding: 4px 16px 8px; }
+    .lg-acciones, .lg-grupo, .lg-acciones form { width: 100%; }
+    .lg-grupo .lg-btn { flex: 1; }
+    .lg-acciones .peligro, .lg-form-pie .lg-btn { width: 100%; }
+  }
+</style>
+</head>
+<body>
+  <header class="lg-barra">
+    <div class="container-xl lg-barra-int">
+      <div class="lg-marca">
+        <svg class="lg-logo" viewBox="0 0 28 28" fill="none" aria-hidden="true">
+          <rect x="0.5" y="0.5" width="27" height="27" rx="7" fill="#1d2421" stroke="#2c3531"/>
+          <path d="M7 9h14M9.5 14h9M12 19h4" stroke="#6fcf97" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+        <span class="lg-nombre">Lead<span>Gen</span></span>
+        <span class="lg-separador" aria-hidden="true"></span>
+        <span class="lg-descriptor">Prospección comercial B2B</span>
+      </div>
+      {% if estado.procesando %}
+        <span class="lg-estado procesando">Procesando</span>
+      {% elif estado.error %}
+        <span class="lg-estado error">Último proceso con error</span>
+      {% else %}
+        <span class="lg-estado listo">Listo</span>
+      {% endif %}
+    </div>
+  </header>
+
+  <main class="container-xl lg-main">
+    <div class="lg-intro">
+      <h1>Panel de prospección</h1>
+      <p>Pega la URL de un directorio, procésala y revisa los resultados aquí mismo.</p>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for categoria, mensaje in messages %}
+        <div class="flash {{ categoria }}">{{ mensaje }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    {% if estado.procesando %}
+      <div class="estado-procesando" id="estado-box">
+        <div>Procesando <strong>{{ estado.url }}</strong>... esto puede tardar según el número de empresas.
+        Esta página se refresca sola cada 5 segundos.</div>
+      </div>
+      <script>
+        setTimeout(() => window.location.reload(), 5000);
+      </script>
+    {% elif estado.error %}
+      <div class="flash error">Ocurrió un error procesando {{ estado.url }}: {{ estado.error }}</div>
+    {% endif %}
+
+    <div class="lg-layout">
+      <section class="lg-panel" aria-labelledby="titulo-busqueda">
+        <div class="lg-panel-cab">
+          <h2 id="titulo-busqueda">Nueva búsqueda</h2>
+          <small>Directorio o Google Maps</small>
+        </div>
+        <div class="lg-panel-cuerpo">
+          <form class="lg-form" method="POST" action="{{ url_for('procesar') }}">
+            <div class="lg-campo">
+              <label class="lg-etiqueta" for="url">URL del directorio</label>
+              <input type="text" id="url" name="url" placeholder="https://directorio-de-empresas.com" required>
+            </div>
+
+            <div class="lg-campo">
+              <label class="lg-etiqueta" for="max_resultados_maps">Máximo de negocios a traer si pegaste una URL de Google Maps</label>
+              <input class="lg-numero" type="text" id="max_resultados_maps" name="max_resultados_maps" value="40">
+              <div class="lg-ayuda">
+                Si la URL contiene "google.com/maps", LeadGen la detecta sola y usa el modo Google Maps automáticamente (no necesitas configurar selectores para eso).
+              </div>
+            </div>
+
+            <div class="lg-opciones">
+              <div class="fila-checkbox">
+                <input type="checkbox" id="usar_navegador" name="usar_navegador">
+                <label for="usar_navegador">Usar navegador (para sitios que cargan datos con JavaScript, ej. React/Next.js). Más lento.</label>
+              </div>
+              <div class="fila-checkbox">
+                <input type="checkbox" id="usar_ia" name="usar_ia">
+                <label for="usar_ia">Generar observaciones con IA (requiere ANTHROPIC_API_KEY configurada)</label>
+              </div>
+            </div>
+
+            <div class="lg-form-pie">
+              <details class="avanzado">
+                <summary>Configuración avanzada de selectores CSS (opcional)</summary>
+                <label class="lg-etiqueta" for="config_json">Pega aquí el contenido de tu config.json (déjalo vacío para usar detección automática)</label>
+                <textarea id="config_json" name="config_json" placeholder='{"selectores_directorio": {"selector_tarjeta": "div.business-card", "selector_enlace": "a.business-card-link"}, "selectores_ficha": {"nombre": "h1.business-name"}}'></textarea>
+              </details>
+              <button class="lg-btn primario" type="submit" {% if estado.procesando %}disabled{% endif %}>Procesar directorio</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <section class="lg-panel" aria-labelledby="titulo-resumen">
+        <div class="lg-panel-cab">
+          <h2 id="titulo-resumen">Resumen</h2>
+          <small>Prospectos válidos</small>
+        </div>
+        {% set proporcion = (stats.potenciales * 100 / stats.total) if stats.total else 0 %}
+        <div class="lg-clave">
+          <div class="lg-clave-etiqueta">Clientes potenciales (pasan el filtro)</div>
+          <div class="lg-clave-valor"><strong>{{ stats.potenciales }}</strong><span>de {{ stats.total }} empresas válidas</span></div>
+          <div class="lg-proporcion" aria-hidden="true"><span style="width: {{ proporcion|round(1) }}%"></span></div>
+        </div>
+        <dl class="lg-metricas">
+          <div><dt>Sin página web</dt><dd>{{ stats.sin_web }}</dd></div>
+          <div><dt>Con web de baja calidad</dt><dd>{{ stats.web_vieja }}</dd></div>
+          <div><dt>Con WhatsApp</dt><dd>{{ stats.con_whatsapp }}</dd></div>
+          <div><dt>Con correo</dt><dd>{{ stats.con_correo }}</dd></div>
+          <div class="atenuada"><dt>Excluidas (no empresa / fuera de mercado)</dt><dd>{{ stats.excluidas }}</dd></div>
+        </dl>
+      </section>
+    </div>
+
+    <section class="lg-panel lg-resultados" aria-labelledby="titulo-resultados">
+      <div class="lg-res-cab">
+        <div>
+          <h2 id="titulo-resultados">Resultados ({{ filas|length }})</h2>
+          <p>Ordenados por score final</p>
+        </div>
+        <div class="lg-acciones">
+          <div class="lg-grupo" role="group" aria-label="Exportar resultados">
+            <a class="lg-btn" href="{{ url_for('exportar', formato='excel') }}">Descargar Excel</a>
+            <a class="lg-btn" href="{{ url_for('exportar', formato='csv') }}">CSV</a>
+            <a class="lg-btn" href="{{ url_for('exportar', formato='json') }}">JSON</a>
+          </div>
+          <form method="POST" action="{{ url_for('limpiar') }}" onsubmit="return confirm('¿Seguro que quieres borrar todos los leads guardados?');" style="display:inline;">
+            <button type="submit" class="lg-btn peligro">Limpiar base de datos</button>
+          </form>
+        </div>
+      </div>
+      <div class="lg-scroll">
+        <table class="lg-tabla">
+          <thead>
+            <tr>
+              <th>Empresa</th><th>Ciudad</th><th>Score final</th><th>Clasificación</th>
+              <th>Web</th><th>WhatsApp</th><th>Correo</th><th>Teléfono</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for f in filas %}
+            <tr>
+              <td class="empresa">{{ f['nombre'] or '-' }}</td>
+              <td>{{ f['ciudad'] or '-' }}</td>
+              <td>
+                {% if f['score_final'] is not none %}
+                  <span class="score">{{ f['score_final'] }}<span class="lg-medidor" aria-hidden="true"><span style="width: {{ [[f['score_final'], 0]|max, 100]|min }}%"></span></span></span>
+                {% else %}
+                  <span class="score">-</span>
+                {% endif %}
+              </td>
+              <td>{{ f['lead_clasificacion'] }}</td>
+              <td><span class="badge {{ 'si' if f['tiene_web'] else 'no' }}">{{ 'Sí' if f['tiene_web'] else 'No' }}</span></td>
+              <td><span class="badge {{ 'si' if f['tiene_whatsapp'] else 'no' }}">{{ 'Sí' if f['tiene_whatsapp'] else 'No' }}</span></td>
+              <td><span class="badge {{ 'si' if f['tiene_correo'] else 'no' }}">{{ 'Sí' if f['tiene_correo'] else 'No' }}</span></td>
+              <td><span class="badge {{ 'si' if f['tiene_telefono'] else 'no' }}">{{ 'Sí' if f['tiene_telefono'] else 'No' }}</span></td>
+            </tr>
+          {% else %}
+            <tr class="lg-vacio"><td colspan="8">Todavía no hay datos. Procesa un directorio arriba para empezar.</td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    {% if excluidas %}
+    <details class="avanzado excluidas">
+      <summary>Registros excluidos ({{ excluidas|length }}): páginas del directorio o fuera del mercado objetivo</summary>
+      <div class="lg-scroll">
+        <table class="lg-tabla">
+          <thead><tr><th>Nombre</th><th>Motivo</th><th>País</th><th>URL</th></tr></thead>
+          <tbody>
+          {% for f in excluidas %}
+            <tr>
+              <td>{{ f['nombre'] or '-' }}</td>
+              <td>{{ 'No es ficha de empresa' if f['es_empresa'] == 0 else 'Fuera del mercado' }}</td>
+              <td>{{ f['pais'] or '-' }}</td>
+              <td class="url">{{ f['url_perfil'] }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+    {% endif %}
+  </main>
+
+  <!-- Dependencia externa: comportamiento de componentes Tabler UI 1.6.1. -->
+  <script src="https://cdn.jsdelivr.net/npm/@tabler/core@1.6.1/dist/js/tabler.min.js"
+          integrity="sha384-1yCHfhyU8+V33urXkAlLLpNYd9jdzXkxdafCg0+auIIEtYFnOuM/DwJQgk5sXY98"
+          crossorigin="anonymous"></script>
+</body>
+</html>

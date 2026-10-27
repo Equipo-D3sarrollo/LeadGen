@@ -36,7 +36,22 @@ def _limpio(v):
     return str(v)
 
 
-def reprocesar_filas(filas: list[dict], catalogo: dict | None = None, diagnosticar: bool = True) -> list[dict]:
+def motivo_conservar_diagnostico(f: dict, rediagnosticar_antiguos: bool = False) -> str:
+    """
+    "ia" si el diagnóstico guardado lo generó la IA (nunca se reemplaza por reglas),
+    "antiguo" si tiene texto pero su origen es desconocido (anterior a diagnostico_origen)
+    y no se pidió regenerarlos; "" si se puede regenerar.
+    """
+    origen = _limpio(f.get("diagnostico_origen"))
+    if origen == "ia":
+        return "ia"
+    if not origen and _limpio(f.get("diagnostico")) and not rediagnosticar_antiguos:
+        return "antiguo"
+    return ""
+
+
+def reprocesar_filas(filas: list[dict], catalogo: dict | None = None, diagnosticar: bool = True,
+                     rediagnosticar_antiguos: bool = False) -> list[dict]:
     """Devuelve las filas con las columnas nuevas (Fases 2-5) agregadas/actualizadas."""
     catalogo = catalogo or mod_catalogo.cargar_catalogo()
     sedes = senales.contar_sedes([_limpio(f.get("nombre")) for f in filas])
@@ -49,6 +64,12 @@ def reprocesar_filas(filas: list[dict], catalogo: dict | None = None, diagnostic
             if v is not None and not (isinstance(v, float) and math.isnan(v)):
                 setattr(cruda, k, v)
         limpia = normalize.normalizar_empresa(cruda)
+        # Marcas históricas: el valor corrupto se descartó en la normalización anterior y ya no
+        # puede revalidarse. Se conserva la marca si el campo sigue vacío; se quita si ahora tiene
+        # un valor válido (evidencia de corrección).
+        historicas = [m.strip() for m in _limpio(f.get("datos_invalidos")).replace(";", ",").split(",") if m.strip()]
+        conservadas = [m for m in historicas if not getattr(limpia, m, "")]
+        limpia.datos_invalidos = list(dict.fromkeys(conservadas + list(limpia.datos_invalidos)))
         val = validate.validar_empresa(limpia)
 
         f.update({k: getattr(limpia, k) for k in CAMPOS_CRUDOS})
@@ -85,10 +106,10 @@ def reprocesar_filas(filas: list[dict], catalogo: dict | None = None, diagnostic
         res = perfil_psicologico.analizar(per, catalogo, lead_score=_num(f.get("lead_score")),
                                           es_empresa=val.es_empresa, fuera_de_mercado=val.fuera_de_mercado)
         f.update(perfil_psicologico.a_columnas(per, res))
-        if diagnosticar:
+        if diagnosticar and not motivo_conservar_diagnostico(f, rediagnosticar_antiguos):
             try:
                 from . import diagnostico
-                f["diagnostico"] = diagnostico.diagnosticar(per, res, f, usar_ia=False)
+                f["diagnostico"], f["diagnostico_origen"] = diagnostico.diagnosticar_con_origen(per, res, f, usar_ia=False)
             except ImportError:
                 pass
         salida.append(f)

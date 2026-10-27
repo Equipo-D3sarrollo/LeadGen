@@ -1,4 +1,6 @@
 import sqlite3
+from unittest.mock import Mock, patch
+
 from leadgen import normalize, validate, senales, google_maps, database
 from leadgen.scraper import EmpresaCruda, extraer_empresa_desde_html
 
@@ -53,6 +55,85 @@ def test_contexto_y_rdap():
     f = senales.fecha_registro_desde_rdap({"events":[{"eventAction":"registration","eventDate":"2010-03-01T00:00:00Z"}]})
     assert f.year == 2010
     assert senales.llave_cadena("Dentix - Sede Norte") == senales.llave_cadena("Dentix")
+
+
+def test_antiguedad_dominio_reutiliza_resultado_positivo_y_normaliza_www():
+    respuesta = Mock(ok=True)
+    respuesta.json.return_value = {
+        "events": [{"eventAction": "registration", "eventDate": "2020-01-01T00:00:00Z"}]
+    }
+    senales._limpiar_cache_rdap()
+    try:
+        with patch("requests.get", return_value=respuesta) as get:
+            primero = senales.antiguedad_dominio("https://WWW.ejemplo.test")
+            segundo = senales.antiguedad_dominio("ejemplo.test")
+
+        assert isinstance(primero, float)
+        assert segundo == primero
+        assert get.call_count == 1
+        assert get.call_args.args == ("https://rdap.org/domain/ejemplo.test",)
+    finally:
+        senales._limpiar_cache_rdap()
+
+
+def test_antiguedad_dominio_reutiliza_resultado_none():
+    respuesta = Mock(ok=False)
+    senales._limpiar_cache_rdap()
+    try:
+        with patch("requests.get", return_value=respuesta) as get:
+            primero = senales.antiguedad_dominio("ejemplo.test")
+            segundo = senales.antiguedad_dominio("www.ejemplo.test")
+
+        assert primero is None
+        assert segundo is None
+        assert get.call_count == 1
+    finally:
+        senales._limpiar_cache_rdap()
+
+
+def test_antiguedad_dominio_a_isla_dominios_diferentes():
+    respuesta_a = Mock(ok=True)
+    respuesta_a.json.return_value = {
+        "events": [{"eventAction": "registration", "eventDate": "2020-01-01T00:00:00Z"}]
+    }
+    respuesta_b = Mock(ok=True)
+    respuesta_b.json.return_value = {
+        "events": [{"eventAction": "registration", "eventDate": "2010-01-01T00:00:00Z"}]
+    }
+    senales._limpiar_cache_rdap()
+    try:
+        with patch("requests.get", side_effect=[respuesta_a, respuesta_b]) as get:
+            resultado_a = senales.antiguedad_dominio("a.ejemplo.test")
+            resultado_b = senales.antiguedad_dominio("b.ejemplo.test")
+            resultado_a_repetido = senales.antiguedad_dominio("A.EJEMPLO.TEST")
+
+        assert resultado_a != resultado_b
+        assert resultado_a_repetido == resultado_a
+        assert get.call_count == 2
+    finally:
+        senales._limpiar_cache_rdap()
+
+
+def test_antiguedad_dominio_eviction_lru_limitada_a_256_entradas():
+    respuesta = Mock(ok=False)
+    senales._limpiar_cache_rdap()
+    try:
+        with patch("requests.get", return_value=respuesta) as get:
+            dominios = [f"dominio-{i}.test" for i in range(256)]
+            for dominio in dominios:
+                senales.antiguedad_dominio(dominio)
+
+            senales.antiguedad_dominio(dominios[0])
+            senales.antiguedad_dominio("dominio-adicional.test")
+
+        assert len(senales._CACHE_RDAP) == 256
+        assert dominios[0] in senales._CACHE_RDAP
+        assert dominios[1] not in senales._CACHE_RDAP
+        assert "dominio-adicional.test" in senales._CACHE_RDAP
+        assert get.call_count == 257
+    finally:
+        senales._limpiar_cache_rdap()
+
 
 def test_db_migra_y_contactos(tmp_path):
     ruta = str(tmp_path/"v.db")

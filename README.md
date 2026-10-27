@@ -161,10 +161,23 @@ puedes:
 - El procesamiento corre en segundo plano; si el directorio tiene muchas
   empresas puede tardar varios minutos (hay una pausa entre peticiones
   para no saturar el sitio que estás consultando).
-- Si quieres exponerlo en tu red local (ej. para verlo desde el celular
-  mientras corre en tu PC), cambia en `webapp/app.py` la línea
-  `app.run(debug=True, port=5000)` por `app.run(debug=True, port=5000, host="0.0.0.0")`
-  y entra desde otro dispositivo con `http://IP-DE-TU-PC:5000`.
+- Por defecto la app escucha solo en `127.0.0.1` (tu propio equipo) y con
+  el modo debug **desactivado**. No hace falta tocar el código.
+- Si necesitas abrirla en tu red local (ej. para verla desde el celular),
+  hazlo con variables de entorno y **siempre con usuario y contraseña**:
+
+  ```powershell
+  $env:LEADGEN_HOST = "0.0.0.0"
+  $env:LEADGEN_USER = "equipo"
+  $env:LEADGEN_PASSWORD = "una-contraseña-larga"
+  python webapp/app.py
+  ```
+
+  y entra desde otro dispositivo con `http://IP-DE-TU-PC:5000`. Nunca
+  actives `LEADGEN_DEBUG=1` con la app abierta a la red: el depurador de
+  Flask permite ejecutar código en tu equipo.
+- Los botones que envían formularios (Procesar, Limpiar) solo aceptan
+  peticiones hechas desde la propia página; otra web no puede dispararlos.
 
 ---
 
@@ -189,7 +202,13 @@ directorio, los demás ven esos leads al entrar.
    Environment Variable"):
    - `LEADGEN_USER` → el usuario que quieras (ej. `equipo`)
    - `LEADGEN_PASSWORD` → una contraseña que tú definas
-   - `SECRET_KEY` → cualquier texto largo y aleatorio
+   - `SECRET_KEY` → cualquier texto largo y aleatorio. Debe ser **estable**:
+     si falta, la app genera una clave temporal en cada arranque y avisa
+     en el log.
+   - `LEADGEN_ORIGENES_PERMITIDOS` → la URL pública de la app, ej.
+     `https://tu-app.onrender.com`. Render atiende el HTTPS antes de llegar
+     a la app; sin esta variable, los botones Procesar y Limpiar responden
+     "origen no verificado".
    
    **Esto es importante:** sin `LEADGEN_USER`/`LEADGEN_PASSWORD`, la app
    queda públicamente abierta para cualquiera en internet que encuentre

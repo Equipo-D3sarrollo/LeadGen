@@ -5,8 +5,18 @@ Interfaz web local para el pipeline de LeadGen.
 
 Uso:
     pip install -r requirements.txt
-    python app.py
+    python webapp/app.py
     -> abre http://localhost:5000 en tu navegador
+
+Seguro por defecto: escucha solo en 127.0.0.1 y sin modo debug. Variables
+de entorno opcionales:
+  - LEADGEN_HOST=0.0.0.0  -> exponerlo en la red local (actívalo junto con
+                             LEADGEN_USER/LEADGEN_PASSWORD).
+  - LEADGEN_DEBUG=1       -> modo debug de Flask (nunca en una red compartida).
+  - SECRET_KEY            -> clave estable; OBLIGATORIA en producción.
+  - LEADGEN_ORIGENES_PERMITIDOS -> orígenes extra aceptados en los POST,
+                             separados por coma (ej. https://tu-app.onrender.com
+                             cuando un proxy termina el HTTPS).
 
 Desde ahí puedes:
   - Pegar la URL de un directorio y procesarla (con selectores opcionales).
@@ -17,12 +27,14 @@ Desde ahí puedes:
 
 from __future__ import annotations
 
+import hmac
 import json
 import os
+import secrets
 import sys
 import threading
-import traceback
 from functools import wraps
+from urllib.parse import urlsplit
 
 from flask import Flask, Response, flash, redirect, render_template, request, send_file, url_for
 
@@ -32,8 +44,15 @@ from leadgen import config, database, export
 from leadgen.pipeline import ejecutar_pipeline
 
 app = Flask(__name__)
-# En producción, define SECRET_KEY como variable de entorno (no dejes el valor por defecto).
-app.secret_key = os.environ.get("SECRET_KEY", "leadgen-dev-key-cambiame")
+# En producción, define SECRET_KEY como variable de entorno con un valor estable.
+# Sin ella se genera una clave aleatoria por proceso: sirve en local, pero los
+# mensajes de la sesión se invalidan en cada reinicio.
+SECRET_KEY = os.environ.get("SECRET_KEY")
+if not SECRET_KEY:
+    SECRET_KEY = secrets.token_hex(32)
+    print("[app] Aviso: SECRET_KEY no está definida; se usa una clave aleatoria temporal. "
+          "En producción configura SECRET_KEY como variable de entorno.", file=sys.stderr)
+app.secret_key = SECRET_KEY
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "leadgen.db")
 
@@ -58,10 +77,58 @@ def login_requerido(f):
         if not LEADGEN_USER or not LEADGEN_PASSWORD:
             return f(*args, **kwargs)  # sin credenciales configuradas -> abierto (uso local)
         auth = request.authorization
-        if not auth or auth.username != LEADGEN_USER or auth.password != LEADGEN_PASSWORD:
+        if not auth:
+            return _requiere_auth()
+        # Comparación en tiempo constante (se evalúan ambas para no filtrar cuál falló)
+        usuario_ok = hmac.compare_digest((auth.username or "").encode(), LEADGEN_USER.encode())
+        clave_ok = hmac.compare_digest((auth.password or "").encode(), LEADGEN_PASSWORD.encode())
+        if not (usuario_ok and clave_ok):
             return _requiere_auth()
         return f(*args, **kwargs)
     return decorada
+
+
+# --- Protección CSRF por origen ---------------------------------------------
+# Todo POST debe venir de la propia app: se compara esquema, host y puerto del
+# Origin (o del Referer si el navegador no envía Origin) con los de la petición.
+# Sin origen verificable se rechaza. Orígenes extra (ej. la URL https pública
+# cuando un proxy como Render termina el TLS) van en LEADGEN_ORIGENES_PERMITIDOS.
+_PUERTOS_POR_DEFECTO = {"http": 80, "https": 443}
+
+
+def _normalizar_origen(url: str) -> tuple[str, str, int] | None:
+    """'https://Ejemplo.com' -> ('https', 'ejemplo.com', 443). None si no es válido."""
+    try:
+        partes = urlsplit(url.strip())
+        esquema = partes.scheme.lower()
+        if esquema not in _PUERTOS_POR_DEFECTO or not partes.hostname:
+            return None
+        return esquema, partes.hostname.lower(), partes.port or _PUERTOS_POR_DEFECTO[esquema]
+    except ValueError:  # puerto inválido, etc.
+        return None
+
+
+ORIGENES_PERMITIDOS = {
+    o for o in (_normalizar_origen(u) for u in os.environ.get("LEADGEN_ORIGENES_PERMITIDOS", "").split(","))
+    if o
+}
+
+
+def _origen_valido() -> bool:
+    enviado = request.headers.get("Origin") or request.headers.get("Referer")
+    if not enviado:
+        return False
+    origen = _normalizar_origen(enviado)
+    if origen is None:  # incluye "Origin: null"
+        return False
+    propio = _normalizar_origen(f"{request.scheme}://{request.host}")
+    return origen == propio or origen in ORIGENES_PERMITIDOS
+
+
+@app.before_request
+def _verificar_origen_post():
+    if request.method == "POST" and not _origen_valido():
+        return Response("Petición rechazada: origen no verificado.", 403)
 
 # Estado simple en memoria para saber si hay un procesamiento en curso
 ESTADO = {"procesando": False, "url": "", "progreso": "", "error": ""}
@@ -72,13 +139,14 @@ def _obtener_filas():
         return database.obtener_todas(conn)
 
 
-def _calcular_stats(filas):
-    total = len(filas)
-    sin_web = sum(1 for f in filas if not f["tiene_web"])
-    web_vieja = sum(1 for f in filas if f["tiene_web"] and (f["web_puntaje"] or 0) < 50)
-    potenciales = sum(1 for f in filas if (f["lead_score"] or 0) >= 50)
-    con_whatsapp = sum(1 for f in filas if f["tiene_whatsapp"])
-    con_correo = sum(1 for f in filas if f["tiene_correo"])
+def _calcular_stats(validas, excluidas):
+    """Estadísticas sobre los prospectos válidos; las excluidas solo se cuentan aparte."""
+    total = len(validas)
+    sin_web = sum(1 for f in validas if not f["tiene_web"])
+    web_vieja = sum(1 for f in validas if f["tiene_web"] and (f["web_puntaje"] or 0) < 50)
+    potenciales = sum(1 for f in validas if f["pasa_filtro"] == 1)
+    con_whatsapp = sum(1 for f in validas if f["tiene_whatsapp"])
+    con_correo = sum(1 for f in validas if f["tiene_correo"])
     return {
         "total": total,
         "sin_web": sin_web,
@@ -86,6 +154,7 @@ def _calcular_stats(filas):
         "potenciales": potenciales,
         "con_whatsapp": con_whatsapp,
         "con_correo": con_correo,
+        "excluidas": len(excluidas),
     }
 
 
@@ -106,8 +175,10 @@ def _correr_pipeline_en_hilo(url, selectores_directorio, selectores_ficha, usar_
             verbose=True,
         )
         ESTADO["progreso"] = "Completado"
-    except Exception as e:
-        ESTADO["error"] = f"{e}\n{traceback.format_exc()}"
+    except Exception:
+        # El detalle (excepción + traza) va solo al registro del servidor; al usuario, un mensaje genérico
+        app.logger.exception("Error procesando %s", url)
+        ESTADO["error"] = "Error interno al procesar. El detalle quedó en el registro del servidor."
         ESTADO["progreso"] = "Error"
     finally:
         ESTADO["procesando"] = False
@@ -116,10 +187,10 @@ def _correr_pipeline_en_hilo(url, selectores_directorio, selectores_ficha, usar_
 @app.route("/", methods=["GET"])
 @login_requerido
 def index():
-    filas = _obtener_filas()
-    stats = _calcular_stats(filas)
-    top = sorted(filas, key=lambda f: f["lead_score"] or 0, reverse=True)
-    return render_template("index.html", filas=top, stats=stats, estado=ESTADO)
+    # obtener_todas ya ordena por score_final (desc); aquí solo se separan las excluidas
+    validas, excluidas = database.separar_prospectos(_obtener_filas())
+    stats = _calcular_stats(validas, excluidas)
+    return render_template("index.html", filas=validas, excluidas=excluidas, stats=stats, estado=ESTADO)
 
 
 @app.route("/procesar", methods=["POST"])
@@ -203,9 +274,18 @@ def limpiar():
     return redirect(url_for("index"))
 
 
-if __name__ == "__main__":
+def _opciones_servidor() -> tuple[str, int, bool]:
+    """(host, puerto, debug) para `python webapp/app.py`. Seguro por defecto: solo local y sin debug."""
+    host = os.environ.get("LEADGEN_HOST", "127.0.0.1")
     puerto = int(os.environ.get("PORT", 5000))
-    modo_local = "PORT" not in os.environ  # Render/Railway definen PORT; en tu PC no existe
-    if modo_local:
-        print("Abre tu navegador en: http://localhost:5000")
-    app.run(debug=modo_local, host="0.0.0.0", port=puerto)
+    debug = os.environ.get("LEADGEN_DEBUG") == "1"
+    return host, puerto, debug
+
+
+if __name__ == "__main__":
+    host, puerto, debug = _opciones_servidor()
+    if host in ("127.0.0.1", "localhost"):
+        print(f"Abre tu navegador en: http://localhost:{puerto}")
+    else:
+        print(f"[app] Aviso: escuchando en {host}:{puerto}, accesible desde otros equipos de la red.")
+    app.run(debug=debug, host=host, port=puerto)

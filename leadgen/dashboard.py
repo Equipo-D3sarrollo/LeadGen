@@ -11,6 +11,9 @@ con WhatsApp, con correo, y una tabla con los mejores leads.
 from __future__ import annotations
 
 import sqlite3
+from html import escape
+
+from . import database
 
 PLANTILLA = """<!DOCTYPE html>
 <html lang="es">
@@ -37,17 +40,18 @@ PLANTILLA = """<!DOCTYPE html>
   <div class="subtitulo">Generado automáticamente por el pipeline</div>
 
   <div class="grid">
-    <div class="card"><div class="num">{total}</div><div class="label">Empresas encontradas</div></div>
+    <div class="card"><div class="num">{total}</div><div class="label">Empresas válidas</div></div>
     <div class="card"><div class="num">{sin_web}</div><div class="label">Sin página web</div></div>
     <div class="card"><div class="num">{web_vieja}</div><div class="label">Con web de baja calidad</div></div>
-    <div class="card"><div class="num">{potenciales}</div><div class="label">Clientes potenciales (score ≥ 50)</div></div>
+    <div class="card"><div class="num">{potenciales}</div><div class="label">Clientes potenciales (pasan el filtro)</div></div>
     <div class="card"><div class="num">{con_whatsapp}</div><div class="label">Con WhatsApp</div></div>
     <div class="card"><div class="num">{con_correo}</div><div class="label">Con correo</div></div>
+    <div class="card"><div class="num">{excluidas}</div><div class="label">Excluidas (no empresa / fuera de mercado)</div></div>
   </div>
 
   <h2>Top leads</h2>
   <table>
-    <tr><th>Empresa</th><th>Ciudad</th><th>Score</th><th>Clasificación</th><th>Web</th><th>WhatsApp</th><th>Correo</th></tr>
+    <tr><th>Empresa</th><th>Ciudad</th><th>Score final</th><th>Clasificación</th><th>Web</th><th>WhatsApp</th><th>Correo</th></tr>
     {filas}
   </table>
 </body>
@@ -55,18 +59,32 @@ PLANTILLA = """<!DOCTYPE html>
 """
 
 
-def generar_dashboard(filas: list[sqlite3.Row], ruta_salida: str = "dashboard.html") -> str:
-    total = len(filas)
-    sin_web = sum(1 for f in filas if not f["tiene_web"])
-    web_vieja = sum(1 for f in filas if f["tiene_web"] and (f["web_puntaje"] or 0) < 50)
-    potenciales = sum(1 for f in filas if (f["lead_score"] or 0) >= 50)
-    con_whatsapp = sum(1 for f in filas if f["tiene_whatsapp"])
-    con_correo = sum(1 for f in filas if f["tiene_correo"])
+def _e(valor) -> str:
+    """Escapa un valor para HTML (texto y atributos con comillas simples o dobles)."""
+    return escape("" if valor is None else str(valor), quote=True)
 
-    top = sorted(filas, key=lambda f: f["lead_score"] or 0, reverse=True)[:30]
+
+def generar_dashboard(filas: list[sqlite3.Row], ruta_salida: str = "dashboard.html") -> str:
+    # Solo prospectos válidos en estadísticas y tabla; las excluidas se cuentan aparte
+    validas, excluidas = database.separar_prospectos(filas)
+    total = len(validas)
+    sin_web = sum(1 for f in validas if not f["tiene_web"])
+    web_vieja = sum(1 for f in validas if f["tiene_web"] and (f["web_puntaje"] or 0) < 50)
+    potenciales = sum(1 for f in validas if f["pasa_filtro"] == 1)
+    con_whatsapp = sum(1 for f in validas if f["tiene_whatsapp"])
+    con_correo = sum(1 for f in validas if f["tiene_correo"])
+
+    # Mismo criterio que database.obtener_todas: score_final desc (sin score al final), luego lead_score
+    top = sorted(
+        validas,
+        key=lambda f: (f["score_final"] if f["score_final"] is not None else -1, f["lead_score"] or 0),
+        reverse=True,
+    )[:30]
+    # Todo dato que viene del scraping o de la base se escapa antes de insertarlo en el HTML (XSS)
     filas_html = "\n".join(
-        f"<tr><td>{f['nombre']}</td><td>{f['ciudad'] or '-'}</td>"
-        f"<td class='score'>{f['lead_score']}</td><td>{f['lead_clasificacion']}</td>"
+        f"<tr><td>{_e(f['nombre'])}</td><td>{_e(f['ciudad'] or '-')}</td>"
+        f"<td class='score'>{_e(f['score_final'] if f['score_final'] is not None else '-')}</td>"
+        f"<td>{_e(f['lead_clasificacion'])}</td>"
         f"<td>{'Sí' if f['tiene_web'] else 'No'}</td>"
         f"<td>{'Sí' if f['tiene_whatsapp'] else 'No'}</td>"
         f"<td>{'Sí' if f['tiene_correo'] else 'No'}</td></tr>"
@@ -80,6 +98,7 @@ def generar_dashboard(filas: list[sqlite3.Row], ruta_salida: str = "dashboard.ht
         potenciales=potenciales,
         con_whatsapp=con_whatsapp,
         con_correo=con_correo,
+        excluidas=len(excluidas),
         filas=filas_html or "<tr><td colspan='7'>Sin datos todavía</td></tr>",
     )
 

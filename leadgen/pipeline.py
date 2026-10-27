@@ -33,6 +33,11 @@ def _completar_contacto_desde_web(limpia: EmpresaCruda, analisis) -> None:
     if not limpia.telefono and analisis.telefono:
         limpia.telefono = analisis.telefono
     normalize.normalizar_empresa(limpia)  # re-normaliza lo rescatado (idempotente)
+    # Un teléfono/WhatsApp válido rescatado de la web reemplaza al corrupto de la fuente:
+    # se quita solo la marca de ese campo (las demás se conservan). La re-normalización
+    # puede repetir una marca si lo rescatado también es inválido; se cuenta una vez.
+    marcas = list(dict.fromkeys(limpia.datos_invalidos))
+    limpia.datos_invalidos = [m for m in marcas if not (m in ("telefono", "whatsapp") and getattr(limpia, m))]
 
 
 def ejecutar_pipeline(
@@ -201,7 +206,8 @@ def ejecutar_pipeline(
                     per = perfil.calcular_perfil(registro)
                     res = perfil_psicologico.analizar(per, catalogo, lead_score, val.es_empresa, val.fuera_de_mercado)
                     registro.update(perfil_psicologico.a_columnas(per, res))
-                    registro["diagnostico"] = diagnostico.diagnosticar(per, res, registro, usar_ia=usar_ia)
+                    registro["diagnostico"], registro["diagnostico_origen"] = diagnostico.diagnosticar_con_origen(
+                        per, res, registro, usar_ia=usar_ia)
                 except Exception as ex:
                     print(f"[pipeline] Análisis psicológico no disponible para {nombre_log}: {ex}")
 

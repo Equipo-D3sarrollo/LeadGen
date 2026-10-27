@@ -26,6 +26,7 @@ Cambios Fase 2 (oct. 2026):
 from __future__ import annotations
 
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, asdict, field
 from urllib.parse import urljoin, urlparse
 
@@ -74,6 +75,36 @@ HERRAMIENTAS = {
     "Zendesk": "zendesk", "Mailchimp": "mailchimp", "Salesforce": "salesforce", "Google Ads": "googleadservices",
     "Clarity": "clarity.ms", "Shopify": "cdn.shopify.com",
 }
+
+_MAX_CACHE_HTTP = 256
+_CACHE_HTTP: OrderedDict[tuple[str, str], tuple[bool, str, str, int]] = OrderedDict()
+
+
+def _limpiar_cache_http() -> None:
+    _CACHE_HTTP.clear()
+
+
+def _obtener_respuesta(url: str, proposito: str):
+    clave = (proposito, url)
+    if clave in _CACHE_HTTP:
+        _CACHE_HTTP.move_to_end(clave)
+        ok, final_url, texto, status_code = _CACHE_HTTP[clave]
+        return _RespuestaCacheada(ok, final_url, texto, status_code)
+
+    respuesta = requests.get(url, headers=config.HEADERS, timeout=config.REQUEST_TIMEOUT)
+    _CACHE_HTTP[clave] = (respuesta.ok, respuesta.url, respuesta.text, respuesta.status_code)
+    _CACHE_HTTP.move_to_end(clave)
+    if len(_CACHE_HTTP) > _MAX_CACHE_HTTP:
+        _CACHE_HTTP.popitem(last=False)
+    return _RespuestaCacheada(respuesta.ok, respuesta.url, respuesta.text, respuesta.status_code)
+
+
+@dataclass(frozen=True)
+class _RespuestaCacheada:
+    ok: bool
+    url: str
+    text: str
+    status_code: int
 
 
 def _detectar_cms(html: str) -> str:
@@ -166,7 +197,7 @@ def analizar_sitio(url: str) -> AnalisisWeb:
 
     inicio = time.time()
     try:
-        resp = requests.get(url, headers=config.HEADERS, timeout=config.REQUEST_TIMEOUT)
+        resp = _obtener_respuesta(url, "principal")
         resultado.tiempo_carga_seg = round(time.time() - inicio, 2)
         resultado.accesible = resp.ok
         # Si hubo redirección a https, cuenta como https
@@ -181,7 +212,7 @@ def analizar_sitio(url: str) -> AnalisisWeb:
     base = f"{parsed.scheme}://{parsed.netloc}"
     for ruta, campo in (("/robots.txt", "tiene_robots_txt"), ("/sitemap.xml", "tiene_sitemap")):
         try:
-            r = requests.get(urljoin(base, ruta), headers=config.HEADERS, timeout=config.REQUEST_TIMEOUT)
+            r = _obtener_respuesta(urljoin(base, ruta), "auxiliar")
             setattr(resultado, campo, r.status_code == 200)
         except requests.RequestException:
             setattr(resultado, campo, False)
