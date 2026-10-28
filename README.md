@@ -22,7 +22,7 @@ pip install -r requirements.txt
 ```
 
 Esto instala: `requests`, `beautifulsoup4`, `pandas`, `openpyxl` y
-`anthropic` (esta última solo se usa si activas el Módulo 7 de IA).
+`openai` (esta última solo se usa si activas los flujos de IA).
 
 ---
 
@@ -230,7 +230,7 @@ directorio, los demás ven esos leads al entrar.
 - **Capa gratuita de Render "duerme"** el servicio si nadie lo usa por un
   rato, y tarda unos segundos en "despertar" en la siguiente visita — es
   normal, no es un error.
-- **Nunca subas tu `ANTHROPIC_API_KEY` al código.** Si quieres activar el
+- **Nunca subas tu `OPENAI_API_KEY` al código.** Si quieres activar el
   Módulo 7 (IA) en producción, agrégala también como variable de entorno
   en Render, igual que `LEADGEN_USER`.
 
@@ -250,7 +250,7 @@ duplicarlos.
 
 Con observaciones de IA (Módulo 7, opcional):
 ```bash
-export ANTHROPIC_API_KEY="tu-clave-aqui"
+export OPENAI_API_KEY="tu-clave-aqui"
 python main.py procesar "https://directorio.com" --ia
 ```
 Si no configuras la clave, el sistema sigue funcionando igual: genera una

@@ -15,7 +15,7 @@ import openpyxl
 import pandas as pd
 import pytest
 
-from leadgen import catalogo, database, diagnostico, export, google_maps, perfil, perfil_psicologico as pp, pipeline, reprocesar
+from leadgen import catalogo, config, database, diagnostico, export, google_maps, perfil, perfil_psicologico as pp, pipeline, reprocesar
 from leadgen.scraper import EmpresaCruda
 
 RAIZ = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -35,14 +35,14 @@ def _uno(fila, **kw):
 
 
 class _ClienteIA:
-    """Cliente de Anthropic simulado: devuelve `texto` o lanza error."""
+    """Cliente de OpenAI simulado: devuelve `texto` o lanza error."""
     def __init__(self, texto="Diagnóstico IA simulado.", falla=False):
-        self.texto, self.falla, self.messages = texto, falla, self
+        self.texto, self.falla, self.responses = texto, falla, self
 
     def create(self, **_):
         if self.falla:
             raise RuntimeError("IA caída")
-        return SimpleNamespace(content=[SimpleNamespace(text=self.texto)])
+        return SimpleNamespace(output_text=self.texto)
 
 
 # --- 1. Marcas históricas de datos inválidos ---------------------------------------
@@ -80,6 +80,7 @@ def _per_res():
 
 def test_diagnosticar_con_origen():
     per, res = _per_res()
+    res.pasa_filtro = False
     e = {"nombre": "Empresa Uno"}
     assert diagnostico.diagnosticar_con_origen(per, res, e, usar_ia=True, cliente=_ClienteIA()) == ("Diagnóstico IA simulado.", "ia")
     assert diagnostico.diagnosticar_con_origen(per, res, e, usar_ia=True, cliente=_ClienteIA(falla=True))[1] == "reglas"
@@ -87,6 +88,32 @@ def test_diagnosticar_con_origen():
     assert diagnostico.diagnosticar_con_origen(per, res, e, usar_ia=False, cliente=_ClienteIA())[1] == "reglas"
     # la API pública no cambia
     assert diagnostico.diagnosticar(per, res, e) == diagnostico.diagnostico_por_reglas(per, res, e)
+
+
+def test_diagnostico_suficiente_por_reglas_no_llama_ia():
+    per, res = _per_res()
+    per.cobertura_global = config.COBERTURA_MINIMA
+    res.pasa_filtro = True
+    cliente = _ClienteIA(falla=True)
+
+    texto, origen = diagnostico.diagnosticar_con_origen(
+        per, res, {"nombre": "Empresa Uno"}, usar_ia=True, cliente=cliente
+    )
+
+    assert origen == "reglas"
+    assert texto == diagnostico.diagnostico_por_reglas(per, res, {"nombre": "Empresa Uno"})
+
+
+def test_diagnostico_ambiguo_conserva_camino_ia():
+    per, res = _per_res()
+    res.pasa_filtro = False
+    cliente = _ClienteIA()
+
+    texto, origen = diagnostico.diagnosticar_con_origen(
+        per, res, {"nombre": "Empresa Uno"}, usar_ia=True, cliente=cliente
+    )
+
+    assert (texto, origen) == ("Diagnóstico IA simulado.", "ia")
 
 
 @pytest.mark.parametrize("origen, previo, rediag, conserva", [
@@ -128,15 +155,14 @@ def _pipeline_maps(tmp_path, monkeypatch, nombre):
 
 
 def test_pipeline_guarda_origen_ia(tmp_path, monkeypatch):
-    import anthropic
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "clave-de-prueba")
-    monkeypatch.setattr(anthropic, "Anthropic", lambda api_key: _ClienteIA())
+    monkeypatch.setenv("OPENAI_API_KEY", "clave-de-prueba")
+    monkeypatch.setattr("leadgen.ai_provider.crear_cliente", lambda: _ClienteIA())
     fila = _pipeline_maps(tmp_path, monkeypatch, "Clínica IA")
     assert fila["diagnostico"] == "Diagnóstico IA simulado." and fila["diagnostico_origen"] == "ia"
 
 
 def test_pipeline_sin_clave_guarda_origen_reglas(tmp_path, monkeypatch):
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     fila = _pipeline_maps(tmp_path, monkeypatch, "Clínica Reglas")
     assert fila["diagnostico"] and fila["diagnostico_origen"] == "reglas"
 

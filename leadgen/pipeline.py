@@ -133,10 +133,10 @@ def ejecutar_pipeline(
                     _completar_contacto_desde_web(limpia, analisis)
                     val = validate.validar_empresa(limpia)
 
-                # Módulo 7 - IA (opcional)
+                # Módulo 7 - Observación técnica por reglas (sin llamada a IA)
                 observacion = ""
                 if usar_ia and analisis is not None:
-                    observacion = ai_analysis.generar_observacion(analisis)
+                    observacion = ai_analysis._observacion_por_reglas(analisis)
 
                 # Módulo 8 - Lead Score (Capa 1, lógica intacta)
                 lead_score = scoring.calcular_lead_score(val, analisis, int(limpia.numero_resenas or 0))

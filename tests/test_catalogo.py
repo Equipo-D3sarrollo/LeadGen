@@ -1,5 +1,5 @@
 import json, types
-from leadgen import catalogo, config
+from leadgen import ai_usage, catalogo, config
 
 SITIO = {
  "https://ej.co/": """<html><body><nav><a href='/servicios'>Servicios</a><a href='/blog'>Blog</a></nav>
@@ -43,15 +43,84 @@ def test_ia_con_cliente_falso_y_fallback():
     resp = {"productos":[{"nombre":"Plan Fibra Pyme","familia":"conectividad","vector_ideal":{"madurez_digital":150},
              "afinidad":{"miedo":0.9},"consultas_busqueda":["hoteles en Cali"]}],
             "opciones_adicionales":[{"oportunidad":"WiFi para hoteles","por_que":"x"}]}
-    cli = types.SimpleNamespace(messages=types.SimpleNamespace(create=lambda **k: types.SimpleNamespace(
-        content=[types.SimpleNamespace(text="Aquí va:\n"+json.dumps(resp))])))
+    cli = types.SimpleNamespace(responses=types.SimpleNamespace(create=lambda **k: types.SimpleNamespace(
+        output_text="Aquí va:\n"+json.dumps(resp))))
     cat = catalogo.leer_catalogo_desde_links(["https://ej.co/"], descargar=lambda u: SITIO.get(u,""), cliente_ia=cli)
     p = cat["productos"][0]
     assert cat["metodo"]=="ia" and p["vector_ideal"]["madurez_digital"]==100 and p["afinidad"]["miedo"]==0.9
     assert p["vector_ideal"]["dolor_urgencia"]==60  # relleno con arquetipo de la familia
-    malo = types.SimpleNamespace(messages=types.SimpleNamespace(create=lambda **k: (_ for _ in ()).throw(RuntimeError("x"))))
+    malo = types.SimpleNamespace(responses=types.SimpleNamespace(create=lambda **k: (_ for _ in ()).throw(RuntimeError("x"))))
     cat2 = catalogo.leer_catalogo_desde_links(["https://ej.co/"], descargar=lambda u: SITIO.get(u,""), cliente_ia=malo)
     assert cat2["metodo"]=="reglas" and cat2["productos"]
+
+def test_construir_con_ia_valida_parametros_y_registra_uso(tmp_path, monkeypatch):
+    llamadas = []
+    ruta_uso = tmp_path / "uso.jsonl"
+    monkeypatch.setattr(ai_usage, "USAGE_LOG_PATH", ruta_uso)
+    datos = {"productos":[{"nombre":"Plan Fibra Pyme","familia":"conectividad"}], "opciones_adicionales":[]}
+    respuesta = types.SimpleNamespace(
+        output_text=json.dumps(datos),
+        usage=types.SimpleNamespace(input_tokens=21, output_tokens=7),
+    )
+
+    class Cliente:
+        class Responses:
+            def create(self, **kwargs):
+                llamadas.append(kwargs)
+                return respuesta
+        responses = Responses()
+
+    productos, opciones = catalogo.construir_con_ia(
+        {"https://ej.co/": "<html><h1>Internet empresarial</h1></html>"}, Cliente()
+    )
+
+    assert len(llamadas) == 1
+    solicitud = llamadas[0]
+    assert solicitud["model"] == config.CATALOGO_MODELO_IA
+    assert solicitud["max_output_tokens"] == config.CATALOGO_MAX_OUTPUT_TOKENS
+    assert isinstance(solicitud["input"], str)
+    formato = solicitud["text"]["format"]
+    assert formato["type"] == "json_schema"
+    assert formato["strict"] is True
+    assert formato["schema"]["additionalProperties"] is False
+    producto_schema = formato["schema"]["properties"]["productos"]["items"]
+    assert set(producto_schema["required"]) == {
+        "nombre", "descripcion", "familia", "dolor_que_resuelve",
+        "sectores_objetivo", "tamano_empresa_objetivo", "vector_ideal",
+        "afinidad", "consultas_busqueda", "productos_complementarios",
+        "justificacion",
+    }
+    assert set(producto_schema["properties"]["vector_ideal"]["properties"]) == set(config.DIMENSIONES)
+    assert set(producto_schema["properties"]["afinidad"]["properties"]) == set(config.EMOCIONES)
+    assert productos[0].familia == "conectividad" and opciones == []
+
+    registro = json.loads(ruta_uso.read_text(encoding="utf-8"))
+    assert registro["flujo"] == "catalogo"
+    assert registro["input_tokens"] == 21 and registro["output_tokens"] == 7
+    assert "prompt" not in registro and "respuesta" not in registro and "content" not in registro
+
+def test_catalogo_fallback_con_bad_request_registra_error(tmp_path, monkeypatch):
+    ruta_uso = tmp_path / "uso.jsonl"
+    monkeypatch.setattr(ai_usage, "USAGE_LOG_PATH", ruta_uso)
+
+    class BadRequestErrorSimulado(Exception):
+        pass
+
+    class Cliente:
+        class Responses:
+            def create(self, **kwargs):
+                raise BadRequestErrorSimulado("solicitud inválida simulada")
+        responses = Responses()
+
+    cat = catalogo.leer_catalogo_desde_links(
+        ["https://ej.co/"], descargar=lambda u: SITIO.get(u, ""), cliente_ia=Cliente()
+    )
+
+    assert cat["metodo"] == "reglas" and cat["productos"]
+    registro = json.loads(ruta_uso.read_text(encoding="utf-8"))
+    assert registro["flujo"] == "catalogo"
+    assert registro["estado"] == "error"
+    assert registro["tipo_error"] == "BadRequestErrorSimulado"
 
 def test_links_caidos_no_rompen():
     cat = catalogo.leer_catalogo_desde_links(["https://no-existe.co/"], usar_ia=False, descargar=lambda u: "")

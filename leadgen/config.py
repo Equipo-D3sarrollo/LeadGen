@@ -57,7 +57,14 @@ DB_PATH = "leadgen.db"
 # ---------------------------------------------------------------------------
 CATALOGO_PATH = "catalogo_productos.json"
 CATALOGO_MAX_PAGINAS = 15          # páginas internas a recorrer por cada link de catálogo
-CATALOGO_MODELO_IA = "claude-sonnet-4-6"
+PROVEEDOR_IA = "openai"
+OPENAI_API_KEY_ENV = "OPENAI_API_KEY"
+OPENAI_API_KEY_TEST_ENV = "OPENAI_API_KEY_TEST"
+OPENAI_MODELO = "gpt-4o-mini"
+CATALOGO_MODELO_IA = OPENAI_MODELO
+CATALOGO_MAX_OUTPUT_TOKENS = 8000
+DIAGNOSTICO_MAX_OUTPUT_TOKENS = 250
+OBSERVACION_MAX_OUTPUT_TOKENS = 100
 
 # ---------------------------------------------------------------------------
 # FASE 2 - Señales

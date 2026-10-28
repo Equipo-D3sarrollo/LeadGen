@@ -5,6 +5,7 @@ __pycache__/
 .env.*
 !.env.example
 leadgen.db
+ai_usage.jsonl
 datos/
 *.xlsx
 playwright-report/

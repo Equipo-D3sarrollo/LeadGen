@@ -12,8 +12,8 @@ Por defecto NO muestra nombres de emociones (alegría/miedo/...), solo su
 traducción de negocio (OBJETIVO.md, Capa 4). Para verlos también:
 config.DIAGNOSTICO_MOSTRAR_EMOCION = True.
 
-Mismo patrón que ai_analysis.py: con ANTHROPIC_API_KEY y usar_ia=True,
-Claude redacta el texto a partir de la evidencia (sin inventar datos);
+Mismo patrón que ai_analysis.py: con OPENAI_API_KEY y usar_ia=True,
+OpenAI redacta el texto a partir de la evidencia (sin inventar datos);
 sin API key, o si falla, se usa la redacción por reglas.
 """
 
@@ -21,8 +21,10 @@ from __future__ import annotations
 
 import json
 import os
+import time
+import uuid
 
-from . import config
+from . import ai_provider, ai_usage, config
 from .perfil import Perfil, dimension_dominante
 from .perfil_psicologico import ResultadoPsico
 
@@ -112,11 +114,24 @@ def diagnostico_por_reglas(perfil: Perfil, res: ResultadoPsico, e: dict) -> str:
     return " ".join(partes)
 
 
-PROMPT_DIAGNOSTICO = """Eres asesor comercial B2B en Colombia. Con la EVIDENCIA (JSON) de una empresa,
-escribe un diagnóstico de 2 a 3 frases en español, en lenguaje de negocio, para un vendedor:
-qué necesita, con qué urgencia, qué tan fácil es que responda y qué ofrecerle primero.
-Reglas: no inventes datos que no estén en la evidencia; si la confianza es baja dilo; no uses
-nombres de emociones (alegría, miedo...), usa su traducción de negocio ("postura").
+def _reglas_suficientes(perfil: Perfil, res: ResultadoPsico) -> bool:
+    """Indica si el filtro existente permite confiar en el diagnóstico por reglas."""
+    return bool(
+        perfil.cobertura_global >= config.COBERTURA_MINIMA
+        and perfil.confianza == "alta"
+        and res.pasa_filtro
+        and res.mejor_producto_nombre
+        and res.compatibilidad_pct is not None
+    )
+
+
+PROMPT_DIAGNOSTICO = """Eres asesor comercial B2B en Colombia.
+
+Redacta un diagnóstico de 2 a 3 frases en español, en lenguaje comercial para un vendedor,
+indicando qué necesita la empresa, con qué urgencia, qué probabilidad hay de que responda
+y qué producto conviene ofrecerle primero.
+Usa únicamente la evidencia proporcionada. Si la confianza es baja, indícalo.
+No inventes datos ni menciones emociones por su nombre; exprésalas como postura comercial.
 
 EVIDENCIA:
 {evidencia}
@@ -131,26 +146,48 @@ def diagnosticar_con_origen(perfil: Perfil, res: ResultadoPsico, e: dict, usar_i
                             cliente=None) -> tuple[str, str]:
     """(texto, origen). origen = "ia" solo si la IA devolvió texto; cualquier respaldo es "reglas"."""
     base = diagnostico_por_reglas(perfil, res, e)
-    if res.excluida or not usar_ia or not (cliente or os.environ.get("ANTHROPIC_API_KEY")):
+    if (
+        res.excluida
+        or not usar_ia
+        or _reglas_suficientes(perfil, res)
+        or not (cliente or os.environ.get(config.OPENAI_API_KEY_ENV))
+    ):
         return base, "reglas"
+    ejecucion_id = str(uuid.uuid4())
+    inicio = time.perf_counter()
     try:
         if cliente is None:
-            import anthropic
-            cliente = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+            cliente = ai_provider.crear_cliente()
         evidencia = {
             "empresa": e.get("nombre"), "categoria": e.get("categoria"), "ciudad": e.get("ciudad"),
             "dimensiones_0_100": perfil.dimensiones, "cobertura": perfil.cobertura,
             "postura": POSTURA_NEGOCIO.get(res.emocion_principal), "claridad": res.claridad,
             "urgencia_pct": res.intent_pct, "mejor_producto": res.mejor_producto_nombre,
             "compatibilidad_pct": res.compatibilidad_pct, "datos_invalidos": perfil.datos_invalidos,
-            "lectura_por_reglas": base,
         }
-        r = cliente.messages.create(
-            model=config.CATALOGO_MODELO_IA, max_tokens=250,
-            messages=[{"role": "user", "content": PROMPT_DIAGNOSTICO.format(evidencia=json.dumps(evidencia, ensure_ascii=False))}],
+        r = cliente.responses.create(
+            model=config.CATALOGO_MODELO_IA,
+            max_output_tokens=config.DIAGNOSTICO_MAX_OUTPUT_TOKENS,
+            input=PROMPT_DIAGNOSTICO.format(evidencia=json.dumps(evidencia, ensure_ascii=False)),
         )
-        texto = r.content[0].text.strip()
-        return (texto, "ia") if texto else (base, "reglas")
+        ai_usage.registrar_uso(
+            "diagnostico", config.CATALOGO_MODELO_IA, r,
+            proveedor=config.PROVEEDOR_IA, estado="success",
+            duracion_ms=round((time.perf_counter() - inicio) * 1000),
+            ejecucion_id=ejecucion_id,
+        )
     except Exception as ex:
+        ai_usage.registrar_uso(
+            "diagnostico", config.CATALOGO_MODELO_IA, None,
+            proveedor=config.PROVEEDOR_IA, estado="error",
+            duracion_ms=round((time.perf_counter() - inicio) * 1000),
+            ejecucion_id=ejecucion_id, tipo_error=type(ex).__name__,
+        )
         print(f"[diagnostico] Falló la IA, uso reglas: {ex}")
         return base, "reglas"
+    try:
+        texto = ai_provider.extraer_texto(r).strip()
+    except Exception as ex:
+        print(f"[diagnostico] Respuesta no utilizable, uso reglas: {type(ex).__name__}")
+        return base, "reglas"
+    return (texto, "ia") if texto else (base, "reglas")
